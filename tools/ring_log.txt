@@ -1,0 +1,53 @@
+🔍 Scanning (держи кольцо рядом с Mac)...
+   3AF26A6C-0599-3030-F6AB-84984EFA3108  rssi= -75  name=SSR-03  ← 🟢 RING!
+
+✅ Found: 'SSR-03' [3AF26A6C-0599-3030-F6AB-84984EFA3108]
+🔗 Connecting (using cached device)...
+
+✅ Connected! MTU=185
+📋 Services:
+
+   00002a29-0000-1000-8000-00805f9b34fb  ['read']
+   00002a24-0000-1000-8000-00805f9b34fb  ['read']
+   00002a25-0000-1000-8000-00805f9b34fb  ['read']
+   00002a27-0000-1000-8000-00805f9b34fb  ['read']
+   00002a26-0000-1000-8000-00805f9b34fb  ['read']
+   00002a23-0000-1000-8000-00805f9b34fb  ['read']
+   00002a2a-0000-1000-8000-00805f9b34fb  ['read']
+   00002a50-0000-1000-8000-00805f9b34fb  ['read']
+   6e400002-b5a3-f393-e0a9-e50e24dcca9e  ['write-without-response', 'write']
+   6e400003-b5a3-f393-e0a9-e50e24dcca9e  ['notify']
+   de5bf72a-d711-4e47-af26-65e3012a5dc7  ['write-without-response', 'write']
+   de5bf729-d711-4e47-af26-65e3012a5dc7  ['notify']
+✅ write_uuids : ['6e400002-b5a3-f393-e0a9-e50e24dcca9e', 'de5bf72a-d711-4e47-af26-65e3012a5dc7']
+✅ preferred   : 6e400002-b5a3-f393-e0a9-e50e24dcca9e
+✅ notify_uuids: ['6e400003-b5a3-f393-e0a9-e50e24dcca9e', 'de5bf729-d711-4e47-af26-65e3012a5dc7']
+
+🔔 Subscribed: 6e400003-b5a3-f393-e0a9-e50e24dcca9e
+🔔 Subscribed: de5bf729-d711-4e47-af26-65e3012a5dc7
+
+=================================================================
+📡 LISTENING — ДЕЛАЙ ЖЕСТЫ КОЛЬЦОМ!
+👆 Подними запястье / встряхни / двойной тап
+=================================================================
+Legend: 👆❗=жест  🔋=батарея  📡=акселерометр  ❓=новое
+
+[23:02:58.952] 🛑 Sent a102 (DISABLE sensors) → 6e400002-b5a3-f393-e0a9-e50e24dcca9e
+[23:02:59.154] 🛑 Sent a102 (DISABLE sensors) → de5bf72a-d711-4e47-af26-65e3012a5dc7
+[23:02:59.858] 📤 Sent 03 (battery query) → 6e400002-b5a3-f393-e0a9-e50e24dcca9e
+[23:02:59.886] 🔋  BATTERY            len=16  HEX: 03 3B 00 00 00 00 00 00 00 00 00 00 00 00 00 3E
+[23:03:00.060] 📤 Sent 03 (battery query) → de5bf72a-d711-4e47-af26-65e3012a5dc7
+
+⏸️  Датчики ВЫКЛЮЧЕНЫ (a102 отправлен, a104 НЕ отправлен)
+   Делай жест кольцом — ищем пассивные пакеты
+
+Нажми Ctrl+C чтобы остановить.
+
+[23:03:20.677] ❓  UNKNOWN_0x73       len=16  HEX: 73 0C 3A 00 00 00 00 00 00 00 00 00 00 00 00 B9  ← NEW!
+[23:03:20.680] ❓  UNKNOWN_0x73       len=16  HEX: 73 12 00 05 0A 00 ED 03 00 03 24 00 00 00 00 AB  ← NEW!
+[23:03:20.680] ❓  UNKNOWN_0x73       len=16  HEX: 73 12 00 05 0B 00 ED 2C 00 03 25 00 00 00 00 D6  ← NEW!
+[23:03:20.680] ❓  UNKNOWN_0x73       len=16  HEX: 73 12 00 05 0D 00 ED 7E 00 03 26 00 00 00 00 2B  ← NEW!
+[23:03:20.680] ❓  UNKNOWN_0x73       len=16  HEX: 73 12 00 05 0F 00 ED D0 00 03 27 00 00 00 00 80  ← NEW!
+[23:03:20.680] ❓  UNKNOWN_0x73       len=16  HEX: 73 12 00 05 0F 00 ED D0 00 03 27 00 00 00 00 80  ← NEW!
+
+📊 Итого акселерометр-пакетов: 0

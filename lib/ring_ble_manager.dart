@@ -400,6 +400,19 @@ class RingBleManager extends ChangeNotifier {
   void disconnectDevice() async {
     if (connectedDevice != null) {
       addLog("Disconnecting from device...", tag: 'info');
+
+      // Disable sensors before disconnecting (prevents ring staying in active mode)
+      if (writeChar != null && isConnected) {
+        try {
+          final disableCmd = createCommand("a102");
+          await writeChar!.write(disableCmd, withoutResponse: true);
+          addLog("Sensors disabled (a102) before disconnect", tag: 'info');
+          await Future.delayed(const Duration(milliseconds: 200));
+        } catch (e) {
+          addLog("Could not disable sensors: $e", tag: 'warn');
+        }
+      }
+
       // Clear preferences so we don't reconnect automatically
       try {
         final prefs = await SharedPreferences.getInstance();
