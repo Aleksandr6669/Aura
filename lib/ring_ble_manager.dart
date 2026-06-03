@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // BLE UUID Constants for Smart Ring
 const String mainServiceUuid = "de5bf728-d711-4e47-af26-65e3012a5dc7";
@@ -64,9 +66,20 @@ class RingBleManager extends ChangeNotifier {
   // Terminal Console Logs
   final List<LogMessage> logs = [];
 
+  List<ScanResult> scanResults = [];
+  bool isScanning = false;
+
+  bool gestureActionsEnabled = false;
+  double gestureThreshold = 2200.0;
+  String assignedActionType = "webhook"; // "webhook" or "ble_command"
+  String assignedActionPayload = "";
+  DateTime? _lastGestureTrigger;
+  bool gestureTriggeredAlert = false;
+
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<List<int>>? _notifySub;
+  StreamSubscription<bool>? _scanningStateSub;
 
   void addLog(String text, {String tag = 'info'}) {
     logs.add(LogMessage(text, tag: tag));
@@ -95,11 +108,91 @@ class RingBleManager extends ChangeNotifier {
     return bytes;
   }
 
-  // Initialize BLE Scanner & Autoconnect loop
+  Future<void> loadGestureSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      gestureActionsEnabled = prefs.getBool("gesture_actions_enabled") ?? false;
+      gestureThreshold = prefs.getDouble("gesture_threshold") ?? 2200.0;
+      assignedActionType = prefs.getString("assigned_action_type") ?? "webhook";
+      assignedActionPayload = prefs.getString("assigned_action_payload") ?? "";
+      notifyListeners();
+    } catch (e) {
+      addLog("Failed to load gesture settings: $e", tag: 'warn');
+    }
+  }
+
+  Future<void> saveGestureSettings({
+    bool? enabled,
+    double? threshold,
+    String? type,
+    String? payload,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (enabled != null) {
+        gestureActionsEnabled = enabled;
+        await prefs.setBool("gesture_actions_enabled", enabled);
+      }
+      if (threshold != null) {
+        gestureThreshold = threshold;
+        await prefs.setDouble("gesture_threshold", threshold);
+      }
+      if (type != null) {
+        assignedActionType = type;
+        await prefs.setString("assigned_action_type", type);
+      }
+      if (payload != null) {
+        assignedActionPayload = payload;
+        await prefs.setString("assigned_action_payload", payload);
+      }
+      notifyListeners();
+    } catch (e) {
+      addLog("Failed to save gesture settings: $e", tag: 'warn');
+    }
+  }
+
+  void _triggerGestureAction() async {
+    addLog("Gesture detected! (Mag: ${lastMag.toStringAsFixed(1)})", tag: 'success');
+    
+    gestureTriggeredAlert = true;
+    notifyListeners();
+    Future.delayed(const Duration(milliseconds: 800), () {
+      gestureTriggeredAlert = false;
+      notifyListeners();
+    });
+
+    if (assignedActionPayload.isEmpty) {
+      addLog("No action payload configured for gestures", tag: 'warn');
+      return;
+    }
+
+    if (assignedActionType == "webhook") {
+      final urlStr = assignedActionPayload.trim();
+      addLog("Triggering Webhook: $urlStr...", tag: 'info');
+      try {
+        final client = HttpClient();
+        client.connectionTimeout = const Duration(seconds: 5);
+        final uri = Uri.parse(urlStr);
+        final request = await client.getUrl(uri);
+        final response = await request.close();
+        addLog("Webhook response code: ${response.statusCode}", tag: 'success');
+        client.close();
+      } catch (e) {
+        addLog("Webhook trigger failed: $e", tag: 'error');
+      }
+    } else if (assignedActionType == "ble_command") {
+      final cmd = assignedActionPayload.trim();
+      addLog("Triggering BLE command: $cmd", tag: 'info');
+      await writeCommand(cmd);
+    }
+  }
+
+  // Initialize BLE Scanner & Autoconnect setup
   void startAutoconnectLoop() async {
     addLog("Initializing Bluetooth adapter...", tag: 'info');
+    await loadGestureSettings();
     
-    // Ensure BLE is turned on
+    // Ensure BLE is turned on/supported
     try {
       if (await FlutterBluePlus.isSupported == false) {
         addLog("Bluetooth not supported on this platform", tag: 'error');
@@ -109,63 +202,96 @@ class RingBleManager extends ChangeNotifier {
       addLog("BLE compatibility check failed: $e", tag: 'error');
     }
 
-    _scanSub = FlutterBluePlus.scanResults.listen((results) async {
-      if (isConnected || connectedDevice != null) return;
-      
-      for (ScanResult r in results) {
-        final name = r.device.platformName;
-        final address = r.device.remoteId.str.toUpperCase();
-        
-        final matchesName = deviceKeywords.any((kw) => name.toLowerCase().contains(kw.toLowerCase()));
-        final matchesMac = address == defaultMac.toUpperCase();
+    _scanningStateSub?.cancel();
+    _scanningStateSub = FlutterBluePlus.isScanning.listen((scanning) {
+      isScanning = scanning;
+      notifyListeners();
+    });
 
-        if (matchesName || matchesMac) {
-          addLog("Found Smart Ring: '$name' [$address]", tag: 'success');
-          // Stop scan and connect
-          await FlutterBluePlus.stopScan();
-          _connectToDevice(r.device);
-          break;
+    _scanSub?.cancel();
+    _scanSub = FlutterBluePlus.scanResults.listen((results) async {
+      scanResults = results;
+      notifyListeners();
+      
+      final prefs = await SharedPreferences.getInstance();
+      final savedId = prefs.getString("last_connected_device_id");
+
+      // 1. Auto-connect to previously saved device if set
+      if (!isConnected && connectedDevice == null && savedId != null) {
+        for (ScanResult r in results) {
+          if (r.device.remoteId.str.toUpperCase() == savedId.toUpperCase()) {
+            addLog("Found saved device ID [$savedId]. Reconnecting...", tag: 'success');
+            stopManualScan();
+            connectToDevice(r.device);
+            return;
+          }
+        }
+      }
+
+      // 2. Auto-connect fallback to defaultMac or keyword match if no saved ID exists
+      if (!isConnected && connectedDevice == null && savedId == null) {
+        for (ScanResult r in results) {
+          final name = r.device.platformName;
+          final address = r.device.remoteId.str.toUpperCase();
+          
+          final matchesName = deviceKeywords.any((kw) => name.toLowerCase().contains(kw.toLowerCase()));
+          final matchesMac = address == defaultMac.toUpperCase();
+
+          if (matchesName || matchesMac) {
+            addLog("Auto-connecting to Smart Ring: '$name' [$address]", tag: 'success');
+            stopManualScan();
+            connectToDevice(r.device);
+            break;
+          }
         }
       }
     });
 
-    _startScanning();
+    startManualScan();
   }
 
-  void _startScanning() async {
-    if (isConnected || connectedDevice != null) return;
-    connectionStatus = "Scanning...";
+  void startManualScan() async {
+    if (isConnected) return;
+    addLog("Scanning for Bluetooth devices...", tag: 'info');
+    scanResults.clear();
     notifyListeners();
-    addLog("Scanning for smart ring devices...", tag: 'info');
     
     try {
-      await FlutterBluePlus.startScan(
-        withServices: [Guid(mainServiceUuid), Guid(rxtxServiceUuid)],
-        timeout: const Duration(seconds: 4),
-      );
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 15));
     } catch (e) {
-      // Fallback scan if filtered scanning fails or is unsupported
-      try {
-        await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
-      } catch (e2) {
-        addLog("Scan failed: $e2", tag: 'error');
-      }
-    }
-    
-    // Auto-reschedule scan if not connected
-    await Future.delayed(const Duration(seconds: 5));
-    if (!isConnected && connectedDevice == null && !isDisposed) {
-      _startScanning();
+      addLog("Scan failed to start: $e", tag: 'error');
     }
   }
 
-  void _connectToDevice(BluetoothDevice device) async {
+  void stopManualScan() async {
+    addLog("Stopping scanner...", tag: 'info');
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (e) {
+      addLog("Failed to stop scan: $e", tag: 'error');
+    }
+  }
+
+  void connectToDevice(BluetoothDevice device) async {
+    if (connectedDevice != null) {
+      disconnectDevice();
+    }
+
     connectedDevice = device;
     connectionStatus = "Connecting...";
     notifyListeners();
     addLog("Connecting to ${device.platformName} [${device.remoteId.str}]...", tag: 'info');
 
-    // Setup connection state listener
+    // Save ID to preferences for persistent auto-connect
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString("last_connected_device_id", device.remoteId.str);
+      addLog("Saved device ID: ${device.remoteId.str}", tag: 'info');
+    } catch (e) {
+      addLog("Could not save device ID: $e", tag: 'warn');
+    }
+
+    _connSub?.cancel();
     _connSub = device.connectionState.listen((state) {
       if (state == BluetoothConnectionState.connected) {
         isConnected = true;
@@ -179,9 +305,31 @@ class RingBleManager extends ChangeNotifier {
     });
 
     try {
-      await device.connect(autoConnect: false);
+      // Set autoConnect to true to allow background connection retention
+      await device.connect(autoConnect: true, timeout: const Duration(seconds: 15));
     } catch (e) {
       addLog("Connection failed: $e", tag: 'error');
+      _handleDisconnect();
+    }
+  }
+
+  void disconnectDevice() async {
+    if (connectedDevice != null) {
+      addLog("Disconnecting from device...", tag: 'info');
+      // Clear preferences so we don't reconnect automatically
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove("last_connected_device_id");
+        addLog("Cleared saved device ID", tag: 'info');
+      } catch (e) {
+        addLog("Could not clear device ID: $e", tag: 'warn');
+      }
+
+      try {
+        await connectedDevice!.disconnect();
+      } catch (e) {
+        addLog("Error disconnecting: $e", tag: 'error');
+      }
       _handleDisconnect();
     }
   }
@@ -219,6 +367,7 @@ class RingBleManager extends ChangeNotifier {
         
         // Start notifications subscription
         await notifyChar!.setNotifyValue(true);
+        _notifySub?.cancel();
         _notifySub = notifyChar!.onValueReceived.listen((data) {
           _parseNotificationData(data);
         });
@@ -287,6 +436,17 @@ class RingBleManager extends ChangeNotifier {
         historyY.add(lastY);
         historyZ.add(lastZ);
         historyMag.add(lastMag);
+
+        // Gesture action check
+        if (gestureActionsEnabled) {
+          if (lastMag > gestureThreshold) {
+            final now = DateTime.now();
+            if (_lastGestureTrigger == null || now.difference(_lastGestureTrigger!) > const Duration(seconds: 2)) {
+              _lastGestureTrigger = now;
+              _triggerGestureAction();
+            }
+          }
+        }
 
         notifyListeners();
       }
@@ -375,7 +535,7 @@ class RingBleManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _handleDisconnect() {
+  void _handleDisconnect() async {
     isConnected = false;
     connectedDevice = null;
     writeChar = null;
@@ -387,10 +547,16 @@ class RingBleManager extends ChangeNotifier {
     
     connectionStatus = "Disconnected";
     notifyListeners();
-    addLog("Ring disconnected. Starting scan...", tag: 'warn');
+    addLog("Ring disconnected.", tag: 'warn');
 
+    // Auto-scan and reconnect in the background if there's a saved device ID
     if (!isDisposed) {
-      _startScanning();
+      final prefs = await SharedPreferences.getInstance();
+      final savedId = prefs.getString("last_connected_device_id");
+      if (savedId != null) {
+        addLog("Saved device ID exists. Scanning to reconnect automatically...", tag: 'info');
+        startManualScan();
+      }
     }
   }
 
@@ -400,6 +566,7 @@ class RingBleManager extends ChangeNotifier {
     _scanSub?.cancel();
     _connSub?.cancel();
     _notifySub?.cancel();
+    _scanningStateSub?.cancel();
     
     // Shut down sensors before disposing to save battery
     if (writeChar != null && isConnected) {
