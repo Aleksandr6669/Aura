@@ -695,13 +695,20 @@ class DevicesTabContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
-    // Rebuilds ONLY when scanned devices length, scanning state or connection state changes
-    return Selector<RingBleManager, (int, bool, BluetoothDevice?)>(
-      selector: (_, m) => (m.scanResults.length, m.isScanning, m.connectedDevice),
+    // Rebuilds ONLY when scanned devices, scanning state, showNamelessDevices setting, or connection state changes
+    return Selector<RingBleManager, (List<ScanResult>, bool, bool, BluetoothDevice?)>(
+      selector: (_, m) {
+        final filtered = m.scanResults.where((r) {
+          if (m.showNamelessDevices) return true;
+          return r.device.platformName.trim().isNotEmpty || r.advertisementData.advName.trim().isNotEmpty;
+        }).toList();
+        return (filtered, m.isScanning, m.showNamelessDevices, m.connectedDevice);
+      },
       builder: (context, data, _) {
-        final resultsCount = data.$1;
+        final filteredList = data.$1;
         final isScanning = data.$2;
-        final connectedDevice = data.$3;
+        final showNamelessDevices = data.$3;
+        final connectedDevice = data.$4;
 
         return Padding(
           padding: const EdgeInsets.all(16.0),
@@ -736,10 +743,38 @@ class DevicesTabContent extends StatelessWidget {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
+              const SizedBox(height: 12),
+
+              // Toggle nameless devices
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF13111C),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF232035)),
+                ),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: showNamelessDevices,
+                      onChanged: (val) {
+                        manager.toggleShowNameless(val ?? false);
+                      },
+                      activeColor: const Color(0xFF74C7EC),
+                    ),
+                    const Expanded(
+                      child: Text(
+                        "Show unnamed BLE devices",
+                        style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 16),
 
               Expanded(
-                child: resultsCount == 0
+                child: filteredList.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -747,7 +782,7 @@ class DevicesTabContent extends StatelessWidget {
                             Icon(Icons.bluetooth_disabled_rounded, size: 48, color: const Color(0xFF5D5A75).withValues(alpha: 0.5)),
                             const SizedBox(height: 12),
                             const Text(
-                              "No smart rings scanned yet.\nClick Scan to discover surrounding devices.",
+                              "No matching BLE devices scanned yet.\nClick Scan to discover surrounding devices.",
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Color(0xFF5D5A75), fontSize: 13),
                             ),
@@ -755,13 +790,19 @@ class DevicesTabContent extends StatelessWidget {
                         ),
                       )
                     : ListView.builder(
-                        itemCount: manager.scanResults.length,
+                        itemCount: filteredList.length,
                         itemBuilder: (context, idx) {
-                          // Safe access in case list changes out of sync
-                          if (idx >= manager.scanResults.length) return const SizedBox.shrink();
-                          final scanResult = manager.scanResults[idx];
+                          if (idx >= filteredList.length) return const SizedBox.shrink();
+                          final scanResult = filteredList[idx];
                           final device = scanResult.device;
-                          final name = device.platformName.isEmpty ? "[Unknown Device]" : device.platformName;
+                          
+                          // Resolve name from platformName or advName, default to ID if nameless is enabled
+                          final name = device.platformName.isEmpty 
+                              ? (scanResult.advertisementData.advName.isEmpty 
+                                  ? "[Unnamed Device]" 
+                                  : scanResult.advertisementData.advName)
+                              : device.platformName;
+
                           final id = device.remoteId.str;
                           final rssi = scanResult.rssi;
                           final isCurrent = connectedDevice?.remoteId == device.remoteId;

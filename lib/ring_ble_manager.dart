@@ -73,6 +73,7 @@ class RingBleManager extends ChangeNotifier {
   double gestureThreshold = 2200.0;
   String assignedActionType = "webhook"; // "webhook" or "ble_command"
   String assignedActionPayload = "";
+  bool showNamelessDevices = false;
   DateTime? _lastGestureTrigger;
   bool gestureTriggeredAlert = false;
 
@@ -90,6 +91,12 @@ class RingBleManager extends ChangeNotifier {
   void toggleFilter(bool enabled) {
     filterEnabled = enabled;
     addLog("Low-Pass Filter: ${enabled ? 'Enabled' : 'Disabled'}", tag: 'info');
+    notifyListeners();
+  }
+
+  void toggleShowNameless(bool value) {
+    showNamelessDevices = value;
+    addLog("Show Nameless Devices: ${value ? 'Enabled' : 'Disabled'}", tag: 'info');
     notifyListeners();
   }
 
@@ -273,6 +280,8 @@ class RingBleManager extends ChangeNotifier {
   }
 
   void connectToDevice(BluetoothDevice device) async {
+    stopManualScan();
+
     if (connectedDevice != null) {
       disconnectDevice();
     }
@@ -331,6 +340,7 @@ class RingBleManager extends ChangeNotifier {
         addLog("Error disconnecting: $e", tag: 'error');
       }
       _handleDisconnect();
+      startManualScan();
     }
   }
 
