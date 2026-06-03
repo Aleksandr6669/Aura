@@ -77,6 +77,13 @@ class RingBleManager extends ChangeNotifier {
   DateTime? _lastGestureTrigger;
   bool gestureTriggeredAlert = false;
 
+  // Wake gesture (double-tap to toggle listening mode, no LEDs)
+  bool wakeGestureEnabled = false;
+  double wakeGestureThreshold = 1400.0;
+  DateTime? _lastWakePeak;         // timestamp of first peak
+  bool _waitingForSecondPeak = false;
+  bool wakeGestureActive = false;  // visual indicator in UI
+
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<List<int>>? _notifySub;
@@ -122,6 +129,8 @@ class RingBleManager extends ChangeNotifier {
       gestureThreshold = prefs.getDouble("gesture_threshold") ?? 2200.0;
       assignedActionType = prefs.getString("assigned_action_type") ?? "webhook";
       assignedActionPayload = prefs.getString("assigned_action_payload") ?? "";
+      wakeGestureEnabled = prefs.getBool("wake_gesture_enabled") ?? false;
+      wakeGestureThreshold = prefs.getDouble("wake_gesture_threshold") ?? 1400.0;
       notifyListeners();
     } catch (e) {
       addLog("Failed to load gesture settings: $e", tag: 'warn');
@@ -133,6 +142,8 @@ class RingBleManager extends ChangeNotifier {
     double? threshold,
     String? type,
     String? payload,
+    bool? wakeEnabled,
+    double? wakeThreshold,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -152,10 +163,74 @@ class RingBleManager extends ChangeNotifier {
         assignedActionPayload = payload;
         await prefs.setString("assigned_action_payload", payload);
       }
+      if (wakeEnabled != null) {
+        wakeGestureEnabled = wakeEnabled;
+        await prefs.setBool("wake_gesture_enabled", wakeEnabled);
+      }
+      if (wakeThreshold != null) {
+        wakeGestureThreshold = wakeThreshold;
+        await prefs.setDouble("wake_gesture_threshold", wakeThreshold);
+      }
       notifyListeners();
     } catch (e) {
       addLog("Failed to save gesture settings: $e", tag: 'warn');
     }
+  }
+
+  /// Detects a double-tap wake gesture (two acceleration peaks within 700ms).
+  /// Silently toggles [gestureActionsEnabled] — no LED commands are sent.
+  void _checkWakeGesture() {
+    if (!wakeGestureEnabled) return;
+    if (lastMag < wakeGestureThreshold) return;
+
+    final now = DateTime.now();
+
+    if (_waitingForSecondPeak && _lastWakePeak != null) {
+      final elapsed = now.difference(_lastWakePeak!).inMilliseconds;
+      if (elapsed > 150 && elapsed < 700) {
+        // ✅ Double-tap confirmed
+        _waitingForSecondPeak = false;
+        _lastWakePeak = null;
+        _triggerWakeToggle();
+        return;
+      } else if (elapsed >= 700) {
+        // Too slow — treat as a new first peak
+        _waitingForSecondPeak = false;
+      }
+    }
+
+    // Register first peak
+    _lastWakePeak = now;
+    _waitingForSecondPeak = true;
+
+    // Auto-reset if no second peak arrives
+    Future.delayed(const Duration(milliseconds: 750), () {
+      if (_waitingForSecondPeak) {
+        _waitingForSecondPeak = false;
+      }
+    });
+  }
+
+  void _triggerWakeToggle() {
+    gestureActionsEnabled = !gestureActionsEnabled;
+    wakeGestureActive = true;
+    notifyListeners();
+
+    // Save new state silently (no LEDs)
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool("gesture_actions_enabled", gestureActionsEnabled);
+    });
+
+    addLog(
+      "⚡ Wake gesture: listening ${gestureActionsEnabled ? 'ON ✓' : 'OFF ✗'}",
+      tag: gestureActionsEnabled ? 'success' : 'warn',
+    );
+
+    // Clear visual indicator after 1.2s
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      wakeGestureActive = false;
+      notifyListeners();
+    });
   }
 
   void _triggerGestureAction() async {
@@ -448,6 +523,9 @@ class RingBleManager extends ChangeNotifier {
         historyZ.add(lastZ);
         historyMag.add(lastMag);
 
+        // Wake gesture check (double-tap, no LEDs)
+        _checkWakeGesture();
+
         // Gesture action check
         if (gestureActionsEnabled) {
           if (lastMag > gestureThreshold) {
@@ -468,6 +546,31 @@ class RingBleManager extends ChangeNotifier {
       final state = data[2] == 1 ? "⚡ Charging" : "Discharging";
       batteryInfo = "$batLvl% ($state)";
       notifyListeners();
+    }
+    // 3. Known gesture/event packets from Colmi firmware
+    //    0x14 = tap / wrist gesture event
+    else if (data[0] == 0x14) {
+      final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      addLog("👆 GESTURE EVENT [0x14]: $hex", tag: 'success');
+      // If the ring itself reports a gesture, toggle listening mode silently
+      if (wakeGestureEnabled) {
+        _triggerWakeToggle();
+      }
+    }
+    // 4. Activity/step event packets
+    else if (data[0] == 0x51 || data[0] == 0x52) {
+      final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      addLog("🏃 ACTIVITY EVENT [0x${data[0].toRadixString(16).toUpperCase()}]: $hex", tag: 'info');
+    }
+    // 5. A1 packets with unknown subtype — log them for discovery
+    else if (data[0] == 0xA1) {
+      final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      addLog("📦 A1 subtype=0x${data[1].toRadixString(16).toUpperCase()}: $hex", tag: 'info');
+    }
+    // 6. CATCH-ALL: log every unknown packet so we can discover the gesture protocol
+    else {
+      final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      addLog("❓ UNKNOWN [0x${data[0].toRadixString(16).toUpperCase()}]: $hex", tag: 'warn');
     }
   }
 

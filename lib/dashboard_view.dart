@@ -357,14 +357,17 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
     // Rebuilds ONLY when settings or connection state changes
-    return Selector<RingBleManager, (bool, bool, double, String, String, bool)>(
+    return Selector<RingBleManager, (bool, bool, double, String, String, bool, bool, double, bool)>(
       selector: (_, m) => (
         m.isConnected,
         m.gestureActionsEnabled,
         m.gestureThreshold,
         m.assignedActionType,
         m.assignedActionPayload,
-        m.gestureTriggeredAlert
+        m.gestureTriggeredAlert,
+        m.wakeGestureEnabled,
+        m.wakeGestureThreshold,
+        m.wakeGestureActive,
       ),
       builder: (context, data, _) {
         final isConnected = data.$1;
@@ -373,6 +376,9 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
         final assignedActionType = data.$4;
         final assignedActionPayload = data.$5;
         final gestureTriggeredAlert = data.$6;
+        final wakeGestureEnabled = data.$7;
+        final wakeGestureThreshold = data.$8;
+        final wakeGestureActive = data.$9;
 
         // Update controller value only when not focused to avoid infinite rebuild loops
         if (_gesturePayloadController.text != assignedActionPayload && !_gestureFocusNode.hasFocus) {
@@ -547,7 +553,147 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                 ),
                 const SizedBox(height: 16),
 
-                // Gesture trigger settings
+                // ─── Wake Gesture card ───────────────────────────────────
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: wakeGestureActive
+                        ? const Color(0xFF1A2B3A)
+                        : const Color(0xFF13111C),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: wakeGestureActive
+                          ? const Color(0xFF89B4FA)
+                          : wakeGestureEnabled
+                              ? const Color(0xFF2A4060)
+                              : const Color(0xFF232035),
+                      width: wakeGestureActive ? 2 : 1,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.gesture_rounded,
+                            color: Color(0xFF89B4FA),
+                            size: 16,
+                          ),
+                          const SizedBox(width: 6),
+                          const Text(
+                            "WAKE GESTURE (ДВОЙНОЙ ТАП)",
+                            style: TextStyle(
+                              color: Color(0xFF89B4FA),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (wakeGestureActive)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: gestureActionsEnabled
+                                    ? const Color(0xFF1C3A28)
+                                    : const Color(0xFF3A1C1C),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                gestureActionsEnabled ? "⚡ ON" : "⚡ OFF",
+                                style: TextStyle(
+                                  color: gestureActionsEnabled
+                                      ? const Color(0xFFA6E3A1)
+                                      : const Color(0xFFF38BA8),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        "Двойной тап по кольцу включает/выключает прослушивание жестов — без огней.",
+                        style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Включить wake-жест",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Switch(
+                            value: wakeGestureEnabled,
+                            onChanged: (val) {
+                              manager.saveGestureSettings(wakeEnabled: val);
+                            },
+                            activeColor: const Color(0xFF89B4FA),
+                          ),
+                        ],
+                      ),
+                      if (wakeGestureEnabled) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          "Чувствительность: ${wakeGestureThreshold.toStringAsFixed(0)}",
+                          style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 12),
+                        ),
+                        Slider(
+                          value: wakeGestureThreshold,
+                          min: 800.0,
+                          max: 2500.0,
+                          divisions: 17,
+                          activeColor: const Color(0xFF89B4FA),
+                          inactiveColor: const Color(0xFF232035),
+                          onChanged: (val) {
+                            manager.saveGestureSettings(wakeThreshold: val);
+                          },
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0B0A11),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF232035)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.info_outline_rounded,
+                                color: Color(0xFF89B4FA),
+                                size: 14,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  gestureActionsEnabled
+                                      ? "Прослушивание жестов: АКТИВНО — дважды тапни чтобы выключить"
+                                      : "Прослушивание жестов: ВЫКЛЮЧЕНО — дважды тапни чтобы включить",
+                                  style: TextStyle(
+                                    color: gestureActionsEnabled
+                                        ? const Color(0xFFA6E3A1)
+                                        : const Color(0xFF9E9BAC),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // ─── Gesture Action Triggers card ─────────────────────────
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
