@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'ring_ble_manager.dart';
 import 'scope_chart.dart';
 
@@ -12,43 +13,10 @@ class DashboardView extends StatefulWidget {
 
 class _DashboardViewState extends State<DashboardView> {
   int _selectedTab = 0;
-  final TextEditingController _cmdController = TextEditingController(text: "SOS");
-  final TextEditingController _gesturePayloadController = TextEditingController();
-  final ScrollController _logScrollController = ScrollController();
-
-  @override
-  void dispose() {
-    _cmdController.dispose();
-    _gesturePayloadController.dispose();
-    _logScrollController.dispose();
-    super.dispose();
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_logScrollController.hasClients) {
-        _logScrollController.animateTo(
-          _logScrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
-    final manager = Provider.of<RingBleManager>(context);
-
-    // Auto-scroll logs when Logs tab is active
-    if (_selectedTab == 3) {
-      _scrollToBottom();
-    }
-
-    // Sync gesture payload controller value if different
-    if (_gesturePayloadController.text != manager.assignedActionPayload) {
-      _gesturePayloadController.text = manager.assignedActionPayload;
-    }
+    // We use Selectors and Consumers down in the widget tree to rebuild only what is necessary.
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B0A11), // Deep dark space theme
@@ -69,17 +37,52 @@ class _DashboardViewState extends State<DashboardView> {
               ),
             ),
             const Spacer(),
-            _buildBatteryBadge(manager),
+            // Only rebuild battery badge when battery info changes
+            Selector<RingBleManager, (bool, String)>(
+              selector: (_, m) => (m.isConnected, m.batteryInfo),
+              builder: (context, data, _) {
+                final isConnected = data.$1;
+                final batteryInfo = data.$2;
+                if (!isConnected) return const SizedBox.shrink();
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1C2C30),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF28565F)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.battery_std_rounded, color: Color(0xFFA6E3A1), size: 14),
+                      const SizedBox(width: 4),
+                      Text(
+                        batteryInfo,
+                        style: const TextStyle(
+                          color: Color(0xFFA6E3A1),
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ],
         ),
       ),
       body: IndexedStack(
         index: _selectedTab,
         children: [
-          _buildScopeTab(manager),
-          _buildControlsTab(manager),
-          _buildDevicesTab(manager),
-          _buildLogsTab(manager),
+          // Tab 1: Scope (listens to high-frequency stream)
+          const ScopeTabContent(),
+          // Tab 2: Controls (uses selector to ignore accelerometer stream)
+          const ControlsTabContent(),
+          // Tab 3: Devices (uses selector to ignore accelerometer stream)
+          const DevicesTabContent(),
+          // Tab 4: Logs (uses selector for logs updates)
+          const LogsTabContent(),
         ],
       ),
       bottomNavigationBar: Container(
@@ -126,36 +129,19 @@ class _DashboardViewState extends State<DashboardView> {
       ),
     );
   }
+}
 
-  Widget _buildBatteryBadge(RingBleManager manager) {
-    if (!manager.isConnected) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C2C30),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF28565F)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.battery_std_rounded, color: Color(0xFFA6E3A1), size: 14),
-          const SizedBox(width: 4),
-          Text(
-            manager.batteryInfo,
-            style: const TextStyle(
-              color: Color(0xFFA6E3A1),
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+// ==========================================
+// TAB 1: SCOPE TAB (High-frequency updates allowed)
+// ==========================================
+class ScopeTabContent extends StatelessWidget {
+  const ScopeTabContent({Key? key}) : super(key: key);
 
-  // --- TAB 1: SCOPE ---
-  Widget _buildScopeTab(RingBleManager manager) {
+  @override
+  Widget build(BuildContext context) {
+    // This widget registers as a full listener, which is correct because the Scope tab
+    // shows real-time accelerometer stream updates.
+    final manager = Provider.of<RingBleManager>(context);
     Color statusColor = manager.isConnected ? const Color(0xFFA6E3A1) : const Color(0xFFF38BA8);
 
     return SingleChildScrollView(
@@ -341,530 +327,629 @@ class _DashboardViewState extends State<DashboardView> {
       ),
     );
   }
+}
 
-  // --- TAB 2: CONTROLS ---
-  Widget _buildControlsTab(RingBleManager manager) {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Controls instruction card
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF1E1D2F), Color(0xFF13111C)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF2E2A44)),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Ring Command Center",
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 6),
-                  Text(
-                    "Send Morse signals, raw HEX command protocols, or trigger/stop ring sensor updates.",
-                    style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
+// ==========================================
+// TAB 2: CONTROLS TAB (Optimized to ignore high-frequency stream)
+// ==========================================
+class ControlsTabContent extends StatefulWidget {
+  const ControlsTabContent({Key? key}) : super(key: key);
 
-            // Command input panel
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF13111C),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF232035)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    "COMMAND INPUT",
-                    style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _cmdController,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: const Color(0xFF0B0A11),
-                      hintText: "E.g. SOS or A104",
-                      hintStyle: const TextStyle(color: Color(0xFF5D5A75)),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Color(0xFF232035)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Color(0xFF74C7EC)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
+  @override
+  State<ControlsTabContent> createState() => _ControlsTabContentState();
+}
 
-                  // Actions row
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: manager.isConnected
-                              ? () => manager.sendMorse(_cmdController.text)
-                              : null,
-                          icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
-                          label: const Text("Morse"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2A283E),
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: const Color(0xFF181622),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: manager.isConnected
-                              ? () => manager.writeCommand(_cmdController.text)
-                              : null,
-                          icon: const Icon(Icons.code_rounded, size: 16),
-                          label: const Text("Send HEX"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2A283E),
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: const Color(0xFF181622),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
+class _ControlsTabContentState extends State<ControlsTabContent> {
+  final TextEditingController _cmdController = TextEditingController(text: "SOS");
+  final TextEditingController _gesturePayloadController = TextEditingController();
+  final FocusNode _gestureFocusNode = FocusNode();
 
-            // Live Update control actions
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF13111C),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF232035)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    "SENSOR CONTROLS",
-                    style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: manager.isConnected
-                        ? () => manager.writeCommand("a104")
-                        : null,
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    label: const Text("Enable Sensor (a104)"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFA6E3A1),
-                      foregroundColor: const Color(0xFF0B0A11),
-                      disabledBackgroundColor: const Color(0xFF181622),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: manager.isConnected
-                        ? () => manager.writeCommand("a102")
-                        : null,
-                    icon: const Icon(Icons.stop_rounded),
-                    label: const Text("Disable Sensor (a102)"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFF38BA8),
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: const Color(0xFF181622),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: manager.isConnected
-                        ? () => manager.writeCommand("03")
-                        : null,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text("Refresh Battery State"),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF74C7EC),
-                      side: const BorderSide(color: Color(0xFF74C7EC)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Gesture Triggers setup card
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: manager.gestureTriggeredAlert ? const Color(0xFF2E1B2D) : const Color(0xFF13111C),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: manager.gestureTriggeredAlert ? const Color(0xFFF38BA8) : const Color(0xFF232035),
-                  width: manager.gestureTriggeredAlert ? 2 : 1,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        "GESTURE TRIGGERS (SHAKE / TAP)",
-                        style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
-                      ),
-                      const Spacer(),
-                      if (manager.gestureTriggeredAlert)
-                        const Text(
-                          "💥 TRIGGERED!",
-                          style: TextStyle(color: Color(0xFFF38BA8), fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        "Enable Gesture Actions",
-                        style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                      ),
-                      Switch(
-                        value: manager.gestureActionsEnabled,
-                        onChanged: (val) {
-                          manager.saveGestureSettings(enabled: val);
-                        },
-                        activeColor: const Color(0xFF74C7EC),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    "Sensitivity Threshold: ${manager.gestureThreshold.toStringAsFixed(0)}",
-                    style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 12),
-                  ),
-                  Slider(
-                    value: manager.gestureThreshold,
-                    min: 1200.0,
-                    max: 3500.0,
-                    divisions: 23,
-                    activeColor: const Color(0xFF74C7EC),
-                    inactiveColor: const Color(0xFF232035),
-                    onChanged: (val) {
-                      manager.saveGestureSettings(threshold: val);
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    "ACTION TYPE",
-                    style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
-                  DropdownButtonFormField<String>(
-                    value: manager.assignedActionType,
-                    dropdownColor: const Color(0xFF13111C),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: const Color(0xFF0B0A11),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Color(0xFF232035)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: "webhook",
-                        child: Text("HTTP Webhook Request", style: TextStyle(color: Colors.white, fontSize: 13)),
-                      ),
-                      DropdownMenuItem(
-                        value: "ble_command",
-                        child: Text("Send BLE HEX Command", style: TextStyle(color: Colors.white, fontSize: 13)),
-                      ),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) {
-                        manager.saveGestureSettings(type: val);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    "ACTION PAYLOAD",
-                    style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _gesturePayloadController,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: const Color(0xFF0B0A11),
-                      hintText: manager.assignedActionType == "webhook"
-                          ? "E.g. http://192.168.1.50/api/trigger"
-                          : "E.g. a102",
-                      hintStyle: const TextStyle(color: Color(0xFF5D5A75)),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Color(0xFF232035)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Color(0xFF74C7EC)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onChanged: (val) {
-                      manager.saveGestureSettings(payload: val);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  @override
+  void dispose() {
+    _cmdController.dispose();
+    _gesturePayloadController.dispose();
+    _gestureFocusNode.dispose();
+    super.dispose();
   }
 
-  // --- TAB 3: DEVICES ---
-  Widget _buildDevicesTab(RingBleManager manager) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Device Scanner Header
-          Row(
-            children: [
-              const Text(
-                "BLE SCANNER",
-                style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              if (manager.isScanning)
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF74C7EC)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
+  @override
+  Widget build(BuildContext context) {
+    final manager = Provider.of<RingBleManager>(context, listen: false);
 
-          // Scan Trigger Button
-          ElevatedButton.icon(
-            onPressed: manager.isScanning ? manager.stopManualScan : manager.startManualScan,
-            icon: Icon(manager.isScanning ? Icons.stop_rounded : Icons.search_rounded),
-            label: Text(manager.isScanning ? "Stop Scanning" : "Scan for Devices"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: manager.isScanning ? const Color(0xFFF38BA8) : const Color(0xFF74C7EC),
-              foregroundColor: const Color(0xFF0B0A11),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          const SizedBox(height: 16),
+    // Rebuilds ONLY when settings or connection state changes
+    return Selector<RingBleManager, (bool, bool, double, String, String, bool)>(
+      selector: (_, m) => (
+        m.isConnected,
+        m.gestureActionsEnabled,
+        m.gestureThreshold,
+        m.assignedActionType,
+        m.assignedActionPayload,
+        m.gestureTriggeredAlert
+      ),
+      builder: (context, data, _) {
+        final isConnected = data.$1;
+        final gestureActionsEnabled = data.$2;
+        final gestureThreshold = data.$3;
+        final assignedActionType = data.$4;
+        final assignedActionPayload = data.$5;
+        final gestureTriggeredAlert = data.$6;
 
-          // Scanning results list
-          Expanded(
-            child: manager.scanResults.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.bluetooth_disabled_rounded, size: 48, color: const Color(0xFF5D5A75).withOpacity(0.5)),
-                        const SizedBox(height: 12),
-                        const Text(
-                          "No smart rings scanned yet.\nClick Scan to discover surrounding devices.",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Color(0xFF5D5A75), fontSize: 13),
-                        ),
-                      ],
+        // Update controller value only when not focused to avoid infinite rebuild loops
+        if (_gesturePayloadController.text != assignedActionPayload && !_gestureFocusNode.hasFocus) {
+          _gesturePayloadController.text = assignedActionPayload;
+        }
+
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Commands card
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF1E1D2F), Color(0xFF13111C)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: manager.scanResults.length,
-                    itemBuilder: (context, idx) {
-                      final scanResult = manager.scanResults[idx];
-                      final device = scanResult.device;
-                      final name = device.platformName.isEmpty ? "[Unknown Device]" : device.platformName;
-                      final id = device.remoteId.str;
-                      final rssi = scanResult.rssi;
-                      final isCurrent = manager.connectedDevice?.remoteId == device.remoteId;
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF2E2A44)),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Ring Command Center",
+                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        "Send Morse signals, raw HEX command protocols, or trigger/stop ring sensor updates.",
+                        style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
 
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: isCurrent ? const Color(0xFF152A22) : const Color(0xFF13111C),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isCurrent ? const Color(0xFF225741) : const Color(0xFF232035),
+                // Manual command input panel
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF13111C),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF232035)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        "COMMAND INPUT",
+                        style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _cmdController,
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: const Color(0xFF0B0A11),
+                          hintText: "E.g. SOS or A104",
+                          hintStyle: const TextStyle(color: Color(0xFF5D5A75)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: const BorderSide(color: Color(0xFF232035)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: const BorderSide(color: Color(0xFF74C7EC)),
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.bluetooth_rounded,
-                              color: isCurrent ? const Color(0xFFA6E3A1) : const Color(0xFF74C7EC),
-                              size: 24,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    name,
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    id,
-                                    style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
-                                  ),
-                                ],
+                      ),
+                      const SizedBox(height: 14),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: isConnected ? () => manager.sendMorse(_cmdController.text) : null,
+                              icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                              label: const Text("Morse"),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF2A283E),
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: const Color(0xFF181622),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               ),
                             ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: isConnected ? () => manager.writeCommand(_cmdController.text) : null,
+                              icon: const Icon(Icons.code_rounded, size: 16),
+                              label: const Text("Send HEX"),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF2A283E),
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: const Color(0xFF181622),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Sensor control buttons
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF13111C),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF232035)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        "SENSOR CONTROLS",
+                        style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        onPressed: isConnected ? () => manager.writeCommand("a104") : null,
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: const Text("Enable Sensor (a104)"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFA6E3A1),
+                          foregroundColor: const Color(0xFF0B0A11),
+                          disabledBackgroundColor: const Color(0xFF181622),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ElevatedButton.icon(
+                        onPressed: isConnected ? () => manager.writeCommand("a102") : null,
+                        icon: const Icon(Icons.stop_rounded),
+                        label: const Text("Disable Sensor (a102)"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFF38BA8),
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: const Color(0xFF181622),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: isConnected ? () => manager.writeCommand("03") : null,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text("Refresh Battery State"),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF74C7EC),
+                          side: const BorderSide(color: Color(0xFF74C7EC)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Gesture trigger settings
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: gestureTriggeredAlert ? const Color(0xFF2E1B2D) : const Color(0xFF13111C),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: gestureTriggeredAlert ? const Color(0xFFF38BA8) : const Color(0xFF232035),
+                      width: gestureTriggeredAlert ? 2 : 1,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Text(
+                            "GESTURE TRIGGERS (SHAKE / TAP)",
+                            style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                          const Spacer(),
+                          if (gestureTriggeredAlert)
+                            const Text(
+                              "💥 TRIGGERED!",
+                              style: TextStyle(color: Color(0xFFF38BA8), fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Enable Gesture Actions",
+                            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                          Switch(
+                            value: gestureActionsEnabled,
+                            onChanged: (val) {
+                              manager.saveGestureSettings(enabled: val);
+                            },
+                            activeColor: const Color(0xFF74C7EC),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        "Sensitivity Threshold: ${gestureThreshold.toStringAsFixed(0)}",
+                        style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 12),
+                      ),
+                      Slider(
+                        value: gestureThreshold,
+                        min: 1200.0,
+                        max: 3500.0,
+                        divisions: 23,
+                        activeColor: const Color(0xFF74C7EC),
+                        inactiveColor: const Color(0xFF232035),
+                        onChanged: (val) {
+                          manager.saveGestureSettings(threshold: val);
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        "ACTION TYPE",
+                        style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      DropdownButtonFormField<String>(
+                        value: assignedActionType,
+                        dropdownColor: const Color(0xFF13111C),
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: const Color(0xFF0B0A11),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: const BorderSide(color: Color(0xFF232035)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: "webhook",
+                            child: Text("HTTP Webhook Request", style: TextStyle(color: Colors.white, fontSize: 13)),
+                          ),
+                          DropdownMenuItem(
+                            value: "ble_command",
+                            child: Text("Send BLE HEX Command", style: TextStyle(color: Colors.white, fontSize: 13)),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            manager.saveGestureSettings(type: val);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        "ACTION PAYLOAD",
+                        style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _gesturePayloadController,
+                        focusNode: _gestureFocusNode,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: const Color(0xFF0B0A11),
+                          hintText: assignedActionType == "webhook"
+                              ? "E.g. http://192.168.1.50/api/trigger"
+                              : "E.g. a102",
+                          hintStyle: const TextStyle(color: Color(0xFF5D5A75)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: const BorderSide(color: Color(0xFF232035)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: const BorderSide(color: Color(0xFF74C7EC)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onChanged: (val) {
+                          manager.saveGestureSettings(payload: val);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ==========================================
+// TAB 3: DEVICES TAB (Optimized to ignore high-frequency stream)
+// ==========================================
+class DevicesTabContent extends StatelessWidget {
+  const DevicesTabContent({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final manager = Provider.of<RingBleManager>(context, listen: false);
+
+    // Rebuilds ONLY when scanned devices length, scanning state or connection state changes
+    return Selector<RingBleManager, (int, bool, BluetoothDevice?)>(
+      selector: (_, m) => (m.scanResults.length, m.isScanning, m.connectedDevice),
+      builder: (context, data, _) {
+        final resultsCount = data.$1;
+        final isScanning = data.$2;
+        final connectedDevice = data.$3;
+
+        return Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    "BLE SCANNER",
+                    style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  if (isScanning)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF74C7EC)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              ElevatedButton.icon(
+                onPressed: isScanning ? manager.stopManualScan : manager.startManualScan,
+                icon: Icon(isScanning ? Icons.stop_rounded : Icons.search_rounded),
+                label: Text(isScanning ? "Stop Scanning" : "Scan for Devices"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isScanning ? const Color(0xFFF38BA8) : const Color(0xFF74C7EC),
+                  foregroundColor: const Color(0xFF0B0A11),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              Expanded(
+                child: resultsCount == 0
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.bluetooth_disabled_rounded, size: 48, color: const Color(0xFF5D5A75).withValues(alpha: 0.5)),
+                            const SizedBox(height: 12),
+                            const Text(
+                              "No smart rings scanned yet.\nClick Scan to discover surrounding devices.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Color(0xFF5D5A75), fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: manager.scanResults.length,
+                        itemBuilder: (context, idx) {
+                          // Safe access in case list changes out of sync
+                          if (idx >= manager.scanResults.length) return const SizedBox.shrink();
+                          final scanResult = manager.scanResults[idx];
+                          final device = scanResult.device;
+                          final name = device.platformName.isEmpty ? "[Unknown Device]" : device.platformName;
+                          final id = device.remoteId.str;
+                          final rssi = scanResult.rssi;
+                          final isCurrent = connectedDevice?.remoteId == device.remoteId;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isCurrent ? const Color(0xFF152A22) : const Color(0xFF13111C),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isCurrent ? const Color(0xFF225741) : const Color(0xFF232035),
+                              ),
+                            ),
+                            child: Row(
                               children: [
-                                Text(
-                                  "$rssi dBm",
-                                  style: TextStyle(
-                                    color: rssi > -70 ? const Color(0xFFA6E3A1) : const Color(0xFFFAB387),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
+                                Icon(
+                                  Icons.bluetooth_rounded,
+                                  color: isCurrent ? const Color(0xFFA6E3A1) : const Color(0xFF74C7EC),
+                                  size: 24,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name,
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        id,
+                                        style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(height: 4),
-                                SizedBox(
-                                  height: 28,
-                                  child: ElevatedButton(
-                                    onPressed: isCurrent
-                                        ? manager.disconnectDevice
-                                        : () => manager.connectToDevice(device),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: isCurrent ? const Color(0xFFF38BA8) : const Color(0xFF2A283E),
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      "$rssi dBm",
+                                      style: TextStyle(
+                                        color: rssi > -70 ? const Color(0xFFA6E3A1) : const Color(0xFFFAB387),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                    child: Text(
-                                      isCurrent ? "Disconnect" : "Connect",
-                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                    const SizedBox(height: 4),
+                                    SizedBox(
+                                      height: 28,
+                                      child: ElevatedButton(
+                                        onPressed: isCurrent
+                                            ? manager.disconnectDevice
+                                            : () => manager.connectToDevice(device),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: isCurrent ? const Color(0xFFF38BA8) : const Color(0xFF2A283E),
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                        child: Text(
+                                          isCurrent ? "Disconnect" : "Connect",
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ==========================================
+// TAB 4: LOGS TAB (Optimized to ignore high-frequency stream)
+// ==========================================
+class LogsTabContent extends StatefulWidget {
+  const LogsTabContent({Key? key}) : super(key: key);
+
+  @override
+  State<LogsTabContent> createState() => _LogsTabContentState();
+}
+
+class _LogsTabContentState extends State<LogsTabContent> {
+  final ScrollController _logScrollController = ScrollController();
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_logScrollController.hasClients) {
+        _logScrollController.animateTo(
+          _logScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _logScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final manager = Provider.of<RingBleManager>(context, listen: false);
+
+    // Rebuilds ONLY when logs size changes
+    return Selector<RingBleManager, int>(
+      selector: (_, m) => m.logs.length,
+      builder: (context, logsCount, _) {
+        _scrollToBottom();
+
+        return Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    "SYSTEM CONSOLE LOGS",
+                    style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        manager.logs.clear();
+                      });
+                    },
+                    icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF38BA8), size: 20),
+                    tooltip: "Clear Logs",
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF09090E),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF232035)),
+                  ),
+                  child: ListView.builder(
+                    controller: _logScrollController,
+                    itemCount: logsCount,
+                    itemBuilder: (context, idx) {
+                      final log = manager.logs[idx];
+                      Color tagColor = const Color(0xFF89B4FA); // Blue info
+                      if (log.tag == 'success') tagColor = const Color(0xFFA6E3A1);
+                      if (log.tag == 'warn') tagColor = const Color(0xFFF9E2AF);
+                      if (log.tag == 'error') tagColor = const Color(0xFFF38BA8);
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: RichText(
+                          text: TextSpan(
+                            style: const TextStyle(fontFamily: 'Fira Code', fontSize: 11, height: 1.3),
+                            children: [
+                              TextSpan(text: "[${log.timestamp}] ", style: const TextStyle(color: Color(0xFF5D5A75))),
+                              TextSpan(text: log.text, style: TextStyle(color: tagColor)),
+                            ],
+                          ),
                         ),
                       );
                     },
                   ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // --- TAB 4: LOGS ---
-  Widget _buildLogsTab(RingBleManager manager) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Logs header
-          Row(
-            children: [
-              const Text(
-                "SYSTEM CONSOLE LOGS",
-                style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: () {
-                  setState(() {
-                    manager.logs.clear();
-                  });
-                },
-                icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF38BA8), size: 20),
-                tooltip: "Clear Logs",
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-
-          // Logs Terminal
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF09090E),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF232035)),
-              ),
-              child: ListView.builder(
-                controller: _logScrollController,
-                itemCount: manager.logs.length,
-                itemBuilder: (context, idx) {
-                  final log = manager.logs[idx];
-                  Color tagColor = const Color(0xFF89B4FA); // Blue info
-                  if (log.tag == 'success') tagColor = const Color(0xFFA6E3A1);
-                  if (log.tag == 'warn') tagColor = const Color(0xFFF9E2AF);
-                  if (log.tag == 'error') tagColor = const Color(0xFFF38BA8);
-
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4.0),
-                    child: RichText(
-                      text: TextSpan(
-                        style: const TextStyle(fontFamily: 'Fira Code', fontSize: 11, height: 1.3),
-                        children: [
-                          TextSpan(text: "[${log.timestamp}] ", style: const TextStyle(color: Color(0xFF5D5A75))),
-                          TextSpan(text: log.text, style: TextStyle(color: tagColor)),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
