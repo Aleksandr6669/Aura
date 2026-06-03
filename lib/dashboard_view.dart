@@ -5,7 +5,7 @@ import 'ring_ble_manager.dart';
 import 'scope_chart.dart';
 
 class DashboardView extends StatefulWidget {
-  const DashboardView({Key? key}) : super(key: key);
+  const DashboardView({super.key});
 
   @override
   State<DashboardView> createState() => _DashboardViewState();
@@ -135,7 +135,7 @@ class _DashboardViewState extends State<DashboardView> {
 // TAB 1: SCOPE TAB (High-frequency updates allowed)
 // ==========================================
 class ScopeTabContent extends StatelessWidget {
-  const ScopeTabContent({Key? key}) : super(key: key);
+  const ScopeTabContent({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -333,7 +333,7 @@ class ScopeTabContent extends StatelessWidget {
 // TAB 2: CONTROLS TAB (Optimized to ignore high-frequency stream)
 // ==========================================
 class ControlsTabContent extends StatefulWidget {
-  const ControlsTabContent({Key? key}) : super(key: key);
+  const ControlsTabContent({super.key});
 
   @override
   State<ControlsTabContent> createState() => _ControlsTabContentState();
@@ -635,7 +635,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                             onChanged: (val) {
                               manager.saveGestureSettings(wakeEnabled: val);
                             },
-                            activeColor: const Color(0xFF89B4FA),
+                            activeThumbColor: const Color(0xFF89B4FA),
                           ),
                         ],
                       ),
@@ -734,7 +734,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                             onChanged: (val) {
                               manager.saveGestureSettings(enabled: val);
                             },
-                            activeColor: const Color(0xFF74C7EC),
+                            activeThumbColor: const Color(0xFF74C7EC),
                           ),
                         ],
                       ),
@@ -761,7 +761,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                       ),
                       const SizedBox(height: 6),
                       DropdownButtonFormField<String>(
-                        value: assignedActionType,
+                        initialValue: assignedActionType,
                         dropdownColor: const Color(0xFF13111C),
                         decoration: InputDecoration(
                           filled: true,
@@ -835,7 +835,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
 // TAB 3: DEVICES TAB (Optimized to ignore high-frequency stream)
 // ==========================================
 class DevicesTabContent extends StatelessWidget {
-  const DevicesTabContent({Key? key}) : super(key: key);
+  const DevicesTabContent({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -1113,7 +1113,7 @@ class DevicesTabContent extends StatelessWidget {
 // TAB 4: LOGS TAB (Optimized to ignore high-frequency stream)
 // ==========================================
 class LogsTabContent extends StatefulWidget {
-  const LogsTabContent({Key? key}) : super(key: key);
+  const LogsTabContent({super.key});
 
   @override
   State<LogsTabContent> createState() => _LogsTabContentState();
