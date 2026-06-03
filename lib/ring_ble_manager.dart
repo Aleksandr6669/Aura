@@ -314,8 +314,8 @@ class RingBleManager extends ChangeNotifier {
     });
 
     try {
-      // Set autoConnect to true to allow background connection retention
-      await device.connect(autoConnect: true, timeout: const Duration(seconds: 15));
+      // Set autoConnect to false to ensure stable GATT service discovery on iOS
+      await device.connect(autoConnect: false, timeout: const Duration(seconds: 15));
     } catch (e) {
       addLog("Connection failed: $e", tag: 'error');
       _handleDisconnect();
@@ -347,6 +347,7 @@ class RingBleManager extends ChangeNotifier {
   void _discoverServices(BluetoothDevice device) async {
     try {
       addLog("Discovering primary GATT services...", tag: 'info');
+      await Future.delayed(const Duration(milliseconds: 600));
       final services = await device.discoverServices();
       
       writeChar = null;

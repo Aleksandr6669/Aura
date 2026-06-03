@@ -695,10 +695,14 @@ class DevicesTabContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
-    // Rebuilds ONLY when scanned devices, scanning state, showNamelessDevices setting, or connection state changes
+    // Rebuilds ONLY when scanned devices, scanning state, showNamelessSetting, or connection state changes
     return Selector<RingBleManager, (List<ScanResult>, bool, bool, BluetoothDevice?)>(
       selector: (_, m) {
+        // Filter out the connected device from scanner results to avoid duplication
         final filtered = m.scanResults.where((r) {
+          if (m.connectedDevice != null && r.device.remoteId == m.connectedDevice!.remoteId) {
+            return false;
+          }
           if (m.showNamelessDevices) return true;
           return r.device.platformName.trim().isNotEmpty || r.advertisementData.advName.trim().isNotEmpty;
         }).toList();
@@ -773,8 +777,25 @@ class DevicesTabContent extends StatelessWidget {
               ),
               const SizedBox(height: 16),
 
+              // 1. Render Connected Device Card at the top
+              if (connectedDevice != null) ...[
+                const Text(
+                  "MY DEVICE (CONNECTED / CONNECTING)",
+                  style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                _buildConnectedDeviceCard(manager, connectedDevice),
+                const SizedBox(height: 16),
+                const Text(
+                  "AVAILABLE DEVICES",
+                  style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+              ],
+
+              // 2. Render Available Devices
               Expanded(
-                child: filteredList.isEmpty
+                child: filteredList.isEmpty && connectedDevice == null
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -796,7 +817,6 @@ class DevicesTabContent extends StatelessWidget {
                           final scanResult = filteredList[idx];
                           final device = scanResult.device;
                           
-                          // Resolve name from platformName or advName, default to ID if nameless is enabled
                           final name = device.platformName.isEmpty 
                               ? (scanResult.advertisementData.advName.isEmpty 
                                   ? "[Unnamed Device]" 
@@ -805,23 +825,20 @@ class DevicesTabContent extends StatelessWidget {
 
                           final id = device.remoteId.str;
                           final rssi = scanResult.rssi;
-                          final isCurrent = connectedDevice?.remoteId == device.remoteId;
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 10),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: isCurrent ? const Color(0xFF152A22) : const Color(0xFF13111C),
+                              color: const Color(0xFF13111C),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: isCurrent ? const Color(0xFF225741) : const Color(0xFF232035),
-                              ),
+                              border: Border.all(color: const Color(0xFF232035)),
                             ),
                             child: Row(
                               children: [
-                                Icon(
+                                const Icon(
                                   Icons.bluetooth_rounded,
-                                  color: isCurrent ? const Color(0xFFA6E3A1) : const Color(0xFF74C7EC),
+                                  color: Color(0xFF74C7EC),
                                   size: 24,
                                 ),
                                 const SizedBox(width: 12),
@@ -856,18 +873,16 @@ class DevicesTabContent extends StatelessWidget {
                                     SizedBox(
                                       height: 28,
                                       child: ElevatedButton(
-                                        onPressed: isCurrent
-                                            ? manager.disconnectDevice
-                                            : () => manager.connectToDevice(device),
+                                        onPressed: () => manager.connectToDevice(device),
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: isCurrent ? const Color(0xFFF38BA8) : const Color(0xFF2A283E),
+                                          backgroundColor: const Color(0xFF2A283E),
                                           foregroundColor: Colors.white,
                                           padding: const EdgeInsets.symmetric(horizontal: 12),
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                         ),
-                                        child: Text(
-                                          isCurrent ? "Disconnect" : "Connect",
-                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                        child: const Text(
+                                          "Connect",
+                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                         ),
                                       ),
                                     ),
@@ -883,6 +898,67 @@ class DevicesTabContent extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildConnectedDeviceCard(RingBleManager manager, BluetoothDevice device) {
+    final name = device.platformName.isEmpty ? "[Saved Device / Smart Ring]" : device.platformName;
+    final id = device.remoteId.str;
+    final isConnecting = manager.connectionStatus == "Connecting...";
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF152A22),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF225741), width: 1.5),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.bluetooth_connected_rounded,
+            color: Color(0xFFA6E3A1),
+            size: 26,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  id,
+                  style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
+                ),
+                if (isConnecting) ...[
+                  const SizedBox(height: 4),
+                  const Text(
+                    "Connecting...",
+                    style: TextStyle(color: Color(0xFFF9E2AF), fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: manager.disconnectDevice,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF38BA8),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text(
+              "Disconnect",
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
