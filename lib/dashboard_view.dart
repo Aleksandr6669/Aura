@@ -2101,8 +2101,21 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                               final isRecording = liveManager.isRecordingGesture;
                               final countdown = liveManager.recordingCountdown;
                               final samplesCount = liveManager.recordedSamples.length;
+                              final statusMsg = liveManager.recordingStatusMessage;
 
-                              // ─── Phase 2: ОЖИДАНИЕ — готов, ждём движения ───
+                              // Sync capturedTemplate into modal-local state when recording finishes
+                              if (liveManager.recordingDone &&
+                                  capturedTemplate.isEmpty &&
+                                  liveManager.recordedSamples.isNotEmpty) {
+                                // Schedule after frame so we don't call setState during build
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  setModalState(() {
+                                    capturedTemplate = List<double>.from(liveManager.recordedSamples);
+                                  });
+                                });
+                              }
+
+                              // ─── Phase: ОЖИДАНИЕ — ждём движения ───
                               if (isWaiting) {
                                 return Container(
                                   padding: const EdgeInsets.all(16),
@@ -2123,14 +2136,14 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                           ),
                                           const SizedBox(width: 10),
                                           Text(
-                                            "ОЖИДАНИЕ ЖЕСТА... ($countdown c)",
+                                            "ОЖИДАНИЕ ЖЕСТА... ($countdown с)",
                                             style: const TextStyle(color: Color(0xFF74C7EC), fontWeight: FontWeight.bold, fontSize: 13),
                                           ),
                                         ],
                                       ),
                                       const SizedBox(height: 8),
                                       const Text(
-                                        "Сделайте жест кольцом — система автоматически начнёт запись при обнаружении движения",
+                                        "Сделайте жест кольцом — система автоматически начнёт запись",
                                         textAlign: TextAlign.center,
                                         style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
                                       ),
@@ -2139,7 +2152,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                 );
                               }
 
-                              // ─── Phase 3: ЗАПИСЬ — активная запись движения ───
+                              // ─── Phase: ЗАПИСЬ — активная запись движения ───
                               if (isRecording) {
                                 return Container(
                                   padding: const EdgeInsets.all(16),
@@ -2167,12 +2180,12 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
-                                        "Собрано: $samplesCount точек (~${(samplesCount / 50.0).toStringAsFixed(1)} сек)",
+                                        "Собрано: $samplesCount точек (~${(samplesCount / 50.0).toStringAsFixed(1)} с)",
                                         style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
                                       ),
-                                      const SizedBox(height: 6),
+                                      const SizedBox(height: 4),
                                       const Text(
-                                        "Завершите движение — запись остановится автоматически",
+                                        "Остановите движение — запись завершится автоматически",
                                         textAlign: TextAlign.center,
                                         style: TextStyle(color: Color(0xFF5D5A75), fontSize: 10),
                                       ),
@@ -2181,12 +2194,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                 );
                               }
 
-                              // ─── Phase 4: ГОТОВО / НАЧАЛО ───
-                              // Grab the template when recording has just finished
-                              if (samplesCount >= 10 && capturedTemplate.isEmpty) {
-                                capturedTemplate = List<double>.from(liveManager.recordedSamples);
-                              }
-
+                              // ─── Phase: ГОТОВО / СТАРТ ───
                               final hasRecorded = capturedTemplate.isNotEmpty;
 
                               return Container(
@@ -2214,11 +2222,27 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        "Длина: ${capturedTemplate.length} точек (~${(capturedTemplate.length / 50.0).toStringAsFixed(1)} сек)",
+                                        "Длина: ${capturedTemplate.length} точек (~${(capturedTemplate.length / 50.0).toStringAsFixed(1)} с)",
                                         style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
                                       ),
                                       const SizedBox(height: 12),
                                     ] else ...[
+                                      // Show error if last attempt failed
+                                      if (statusMsg.isNotEmpty) ...[
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.warning_amber_rounded, color: Color(0xFFEBA0AC), size: 15),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                statusMsg,
+                                                style: const TextStyle(color: Color(0xFFEBA0AC), fontSize: 11),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                      ],
                                       const Text(
                                         "Нажмите кнопку, затем сделайте любой жест кольцом — система запишет его автоматически.",
                                         style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
@@ -2227,7 +2251,16 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                     ],
                                     ElevatedButton.icon(
                                       onPressed: liveManager.isConnected
-                                          ? () => liveManager.startRecordingGesture()
+                                          ? () {
+                                              // Reset done flag so next recording starts fresh
+                                              if (hasRecorded) {
+                                                setModalState(() {
+                                                  capturedTemplate = [];
+                                                });
+                                                liveManager.clearRecordedSamples();
+                                              }
+                                              liveManager.startRecordingGesture();
+                                            }
                                           : null,
                                       icon: Icon(hasRecorded ? Icons.refresh_rounded : Icons.fiber_manual_record_rounded),
                                       label: Text(hasRecorded ? "Перезаписать жест" : "Подготовить запись"),

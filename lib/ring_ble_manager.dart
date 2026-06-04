@@ -180,6 +180,8 @@ class RingBleManager extends ChangeNotifier {
   // Dynamic recording state variables
   bool isRecordingGesture = false;        // true = actively collecting samples
   bool isWaitingForGesture = false;       // true = armed, waiting for motion to start
+  bool recordingDone = false;             // true when recording just finished successfully
+  String recordingStatusMessage = "";    // error/status message shown in the modal UI
   List<double> recordedSamples = [];
   Timer? _recordingTimer;                 // max-duration safety timeout
   Timer? _silenceTimer;                   // fires when motion stops
@@ -614,13 +616,16 @@ class RingBleManager extends ChangeNotifier {
     _silenceTimer = null;
     isRecordingGesture = false;
     isWaitingForGesture = false;
-    notifyListeners();
     if (recordedSamples.length >= 10) {
+      recordingDone = true;
+      recordingStatusMessage = "";
       addLog("✅ Жест записан: ${recordedSamples.length} точек (~${(recordedSamples.length / 50.0).toStringAsFixed(1)} сек)", tag: 'success');
     } else {
-      addLog("⚠️ Жест слишком короткий (${recordedSamples.length} точек) — попробуйте ещё раз", tag: 'warn');
-      recordedSamples.clear(); // Discard too-short gestures
+      recordingStatusMessage = "Жест слишком короткий (${recordedSamples.length} точек) — попробуйте ещё раз";
+      recordedSamples.clear();
+      addLog("⚠️ Жест слишком короткий (${recordedSamples.length} точек)", tag: 'warn');
     }
+    notifyListeners();
   }
 
   void _abortRecording(String reason) {
@@ -631,6 +636,7 @@ class RingBleManager extends ChangeNotifier {
     isRecordingGesture = false;
     isWaitingForGesture = false;
     recordedSamples.clear();
+    recordingStatusMessage = reason;
     notifyListeners();
     addLog("❌ $reason", tag: 'warn');
   }
@@ -639,6 +645,8 @@ class RingBleManager extends ChangeNotifier {
     recordedSamples.clear();
     isRecordingGesture = false;
     isWaitingForGesture = false;
+    recordingDone = false;
+    recordingStatusMessage = "";
     _recordingTimer?.cancel();
     _recordingTimer = null;
     _silenceTimer?.cancel();
