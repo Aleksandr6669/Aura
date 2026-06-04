@@ -1486,11 +1486,12 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
   Widget build(BuildContext context) {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
-    return Selector<RingBleManager, (bool, double, double, int, bool, bool)>(
+    return Selector<RingBleManager, (bool, double, double, double, int, bool, bool)>(
       selector: (_, m) => (
         m.gestureActionsEnabled,
         m.gestureThreshold,
         m.customGestureThreshold,
+        m.motionThreshold,
         m.rulesVersion,
         m.wakeGestureEnabled,
         m.isStreaming,
@@ -1499,9 +1500,10 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
         // data.$1 is gestureActionsEnabled (using isStreaming for UI toggle)
         final gestureThreshold = data.$2;
         final customGestureThreshold = data.$3;
-        // rulesVersion (data.$4) is used by Selector to trigger rebuilds
-        final wakeGestureEnabled = data.$5;
-        final isStreaming = data.$6;
+        final motionThreshold = data.$4;
+        // rulesVersion (data.$5) is used by Selector to trigger rebuilds
+        final wakeGestureEnabled = data.$6;
+        final isStreaming = data.$7;
         final gestureRules = manager.gestureRules;
 
         return Scaffold(
@@ -1684,6 +1686,46 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                             manager.saveGestureSettings(customThreshold: val);
                           },
                         ),
+                        const Divider(color: Color(0xFF232035), height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Порог начала движения (Deviation)",
+                                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  "Меньше = более чувствительно к слабым взмахам (например, ~50)",
+                                  style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                ),
+                              ],
+                            ),
+                            Text(
+                              motionThreshold.toStringAsFixed(0),
+                              style: const TextStyle(
+                                color: Color(0xFF74C7EC),
+                                  fontSize: 13,
+                                  fontFamily: 'Fira Code',
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Slider(
+                            value: motionThreshold,
+                            min: 20.0,
+                            max: 400.0,
+                            divisions: 38,
+                            activeColor: const Color(0xFF74C7EC),
+                            inactiveColor: const Color(0xFF232035),
+                            onChanged: (val) {
+                              manager.saveGestureSettings(motionThreshold: val);
+                            },
+                          ),
                         const Divider(color: Color(0xFF232035), height: 24),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,

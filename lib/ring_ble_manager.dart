@@ -172,6 +172,7 @@ class RingBleManager extends ChangeNotifier {
   bool gestureActionsEnabled = false;
   double gestureThreshold = 2200.0;
   double customGestureThreshold = 0.65;
+  double motionThreshold = 180.0;
   String assignedActionType = "webhook"; // "webhook" or "ble_command"
   String assignedActionPayload = "";
   bool showNamelessDevices = false;
@@ -255,6 +256,7 @@ class RingBleManager extends ChangeNotifier {
       gestureActionsEnabled = prefs.getBool("gesture_actions_enabled") ?? false;
       gestureThreshold = prefs.getDouble("gesture_threshold") ?? 2200.0;
       customGestureThreshold = prefs.getDouble("custom_gesture_threshold") ?? 0.65;
+      motionThreshold = prefs.getDouble("gesture_motion_threshold") ?? 180.0;
       assignedActionType = prefs.getString("assigned_action_type") ?? "webhook";
       assignedActionPayload = prefs.getString("assigned_action_payload") ?? "";
       wakeGestureEnabled = prefs.getBool("wake_gesture_enabled") ?? false;
@@ -358,6 +360,7 @@ class RingBleManager extends ChangeNotifier {
     bool? enabled,
     double? threshold,
     double? customThreshold,
+    double? motionThreshold,
     String? type,
     String? payload,
     bool? wakeEnabled,
@@ -383,6 +386,10 @@ class RingBleManager extends ChangeNotifier {
       if (customThreshold != null) {
         customGestureThreshold = customThreshold;
         await prefs.setDouble("custom_gesture_threshold", customThreshold);
+      }
+      if (motionThreshold != null) {
+        this.motionThreshold = motionThreshold;
+        await prefs.setDouble("gesture_motion_threshold", motionThreshold);
       }
       if (type != null) {
         assignedActionType = type;
@@ -1231,13 +1238,15 @@ class RingBleManager extends ChangeNotifier {
 
         // 2. Process real-time custom gesture DTW matching with active motion detection
         if (isStreaming && !isRecordingGesture && !isWaitingForGesture) {
-          // Update baseline slowly when not actively moving
+          // Initialize baseline on first packet, then update slowly when not actively moving
+          if (_runningBaseline == 1000.0) {
+            _runningBaseline = currentMag;
+          }
           if (!_isMovingActive) {
             _runningBaseline = _runningBaseline * 0.95 + currentMag * 0.05;
           }
 
           final deviation = (currentMag - _runningBaseline).abs();
-          const double motionThreshold = 180.0;
 
           if (deviation > motionThreshold) {
             if (!_isMovingActive) {
@@ -1252,16 +1261,16 @@ class RingBleManager extends ChangeNotifier {
             if (_isMovingActive) {
               _activeMotionBuffer.add(currentMag);
               _quietSampleCount++;
-              // 15 samples of quiet at ~50Hz is about 300ms
-              if (_quietSampleCount > 15) {
+              // At 1.3Hz, 2 samples of quiet is about 1.5 seconds of stillness
+              if (_quietSampleCount >= 2) {
                 _isMovingActive = false;
                 _processFinishedGesture();
               }
             }
           }
 
-          if (_activeMotionBuffer.length > 300) {
-            // More than 6 seconds of movement, reset
+          if (_activeMotionBuffer.length > 10) {
+            // More than 8 seconds of movement at 1.3Hz, reset
             _isMovingActive = false;
             _activeMotionBuffer.clear();
             addLog("⚠️ Движение слишком длинное, сброс", tag: 'warn');
@@ -1437,6 +1446,7 @@ class RingBleManager extends ChangeNotifier {
 
   Future<void> startStream() async {
     if (!isConnected) return;
+    _runningBaseline = 1000.0;
     _startPlaybackTimer();
     addLog("🟢 Запуск стрима акселерометра...", tag: 'info');
     await writeCommand("0a0200");
