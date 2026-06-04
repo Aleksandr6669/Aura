@@ -553,12 +553,15 @@ class RingBleManager extends ChangeNotifier {
     );
     _activeMotionBuffer.clear();
 
-    if (gestureData.length < 8) {
+    // Trim the live gesture to match the same active motion bounds as the template
+    final trimmedLive = trimActiveMotion(gestureData);
+
+    if (trimmedLive.length < 8) {
       // Too short to be a gesture
       return;
     }
 
-    addLog("⚡ Движение завершено. Длина: ${gestureData.length} точек. Распознавание...", tag: 'info');
+    addLog("⚡ Движение завершено. Длина: ${trimmedLive.length} точек. Распознавание...", tag: 'info');
 
     GestureRule? bestRule;
     double bestNormalizedDist = double.infinity;
@@ -566,7 +569,7 @@ class RingBleManager extends ChangeNotifier {
     for (var rule in gestureRules) {
       if (rule.triggerType != "custom" || rule.template == null || rule.template!.length < 5) continue;
 
-      final liveNormalized = standardize(gestureData);
+      final liveNormalized = standardize(trimmedLive);
       final templateNormalized = standardize(rule.template!);
 
       final rawDist = calculateDtw(liveNormalized, templateNormalized);
@@ -658,6 +661,41 @@ class RingBleManager extends ChangeNotifier {
     }
   }
 
+  List<double> trimActiveMotion(List<double> samples) {
+    if (samples.length < 10) return samples;
+    
+    // Calculate baseline from the first few samples (assumed quiet)
+    double sum = 0.0;
+    int baselineCount = math.min(15, samples.length);
+    for (int i = 0; i < baselineCount; i++) {
+      sum += samples[i];
+    }
+    double baseline = sum / baselineCount;
+    
+    int firstActiveIdx = -1;
+    int lastActiveIdx = -1;
+    const double threshold = 150.0;
+    
+    for (int i = 0; i < samples.length; i++) {
+      if ((samples[i] - baseline).abs() > threshold) {
+        if (firstActiveIdx == -1) {
+          firstActiveIdx = i;
+        }
+        lastActiveIdx = i;
+      }
+    }
+    
+    if (firstActiveIdx == -1) {
+      return samples;
+    }
+    
+    // Pad with 5 samples before/after for transitions
+    int start = math.max(0, firstActiveIdx - 5);
+    int end = math.min(samples.length, lastActiveIdx + 5);
+    
+    return samples.sublist(start, end);
+  }
+
   void stopRecordingGesture() {
     if (!isRecordingGesture && !isWaitingForGesture) return;
     _recordingTimer?.cancel();
@@ -666,14 +704,19 @@ class RingBleManager extends ChangeNotifier {
     _silenceTimer = null;
     isRecordingGesture = false;
     isWaitingForGesture = false;
-    if (recordedSamples.length >= 2) {
+
+    // Crop the recorded template to only contain the active motion shape
+    final trimmed = trimActiveMotion(recordedSamples);
+
+    if (trimmed.length >= 8) {
+      recordedSamples = trimmed;
       recordingDone = true;
       recordingStatusMessage = "";
       addLog("✅ Жест записан: ${recordedSamples.length} точек (~${(recordedSamples.length / 50.0).toStringAsFixed(1)} сек)", tag: 'success');
     } else {
-      recordingStatusMessage = "Жест слишком короткий (${recordedSamples.length} точек) — попробуйте ещё раз";
+      recordingStatusMessage = "Жест слишком короткий (${trimmed.length} точек) — попробуйте ещё раз";
       recordedSamples.clear();
-      addLog("⚠️ Жест слишком короткий (${recordedSamples.length} точек)", tag: 'warn');
+      addLog("⚠️ Жест слишком короткий (${trimmed.length} точек)", tag: 'warn');
     }
     if (!gestureActionsEnabled) {
       stopStream();
@@ -1085,11 +1128,7 @@ class RingBleManager extends ChangeNotifier {
           }
         });
 
-        if (gestureActionsEnabled) {
-          await startStream();
-        } else {
-          addLog("Ring ready. Turn on gesture actions to stream data.", tag: 'info');
-        }
+        addLog("Ring ready. Awaiting commands or triggers.", tag: 'info');
       } else {
         addLog("Error: Could not map GATT interface characteristics", tag: 'error');
       }
@@ -1364,8 +1403,6 @@ class RingBleManager extends ChangeNotifier {
     if (!isConnected) return;
     _startPlaybackTimer();
     addLog("🟢 Запуск стрима акселерометра...", tag: 'info');
-    await writeCommand("0a0200");
-    await Future.delayed(const Duration(milliseconds: 300));
     await writeCommand("a104");
     _resetStreamTimeout();
   }

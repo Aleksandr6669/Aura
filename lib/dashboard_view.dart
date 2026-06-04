@@ -1676,8 +1676,8 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                         Slider(
                           value: customGestureThreshold,
                           min: 0.3,
-                          max: 0.9,
-                          divisions: 12,
+                          max: 2.0,
+                          divisions: 34,
                           activeColor: const Color(0xFF74C7EC),
                           inactiveColor: const Color(0xFF232035),
                           onChanged: (val) {
