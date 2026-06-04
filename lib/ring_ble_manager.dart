@@ -531,6 +531,16 @@ class RingBleManager extends ChangeNotifier {
         }
       }
 
+      // Disable notifications before disconnecting
+      for (var char in notifyChars) {
+        try {
+          await char.setNotifyValue(false);
+          addLog("Notifications disabled for ${char.uuid.toString().substring(0, 8)}", tag: 'info');
+        } catch (e) {
+          addLog("Could not disable notifications: $e", tag: 'warn');
+        }
+      }
+
       // Clear preferences so we don't reconnect automatically
       try {
         final prefs = await SharedPreferences.getInstance();
