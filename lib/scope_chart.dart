@@ -52,6 +52,25 @@ class _ScopePainter extends CustomPainter {
       ..color = const Color(0xFF181A26)
       ..strokeWidth = 1.0;
 
+    // 1. Calculate dynamic max scale based on peak history values
+    double maxVal = 10.0;
+    for (var val in historyX) {
+      if (val.abs() > maxVal) maxVal = val.abs();
+    }
+    for (var val in historyY) {
+      if (val.abs() > maxVal) maxVal = val.abs();
+    }
+    for (var val in historyZ) {
+      if (val.abs() > maxVal) maxVal = val.abs();
+    }
+    for (var val in historyMag) {
+      if (val.abs() > maxVal) maxVal = val.abs();
+    }
+
+    // Set dynamic maxScale directly to maxVal with a minimum floor of 100.0 (no headroom multiplier)
+    double maxScale = maxVal;
+    if (maxScale < 100.0) maxScale = 100.0;
+
     // Draw vertical grid lines
     const int verticalDividers = 10;
     for (int i = 0; i <= verticalDividers; i++) {
@@ -59,13 +78,13 @@ class _ScopePainter extends CustomPainter {
       canvas.drawLine(Offset(x, 0), Offset(x, h), gridPaint);
     }
 
-    // Draw horizontal grid lines (for value levels: -1500, -1000, -500, 0, 500, 1000, 1500)
-    const maxScale = 2000.0;
+    // Draw dynamic horizontal grid lines based on current maxScale
+    final double step = (maxScale / 4).roundToDouble();
+    final levels = [-4 * step, -3 * step, -2 * step, -step, 0.0, step, 2 * step, 3 * step, 4 * step];
     final textPainter = TextPainter(
       textDirection: TextDirection.ltr,
     );
 
-    final levels = [-1500.0, -1000.0, -500.0, 0.0, 500.0, 1000.0, 1500.0];
     for (var lvl in levels) {
       // Map level value to y-axis coordinates (0 is center)
       final double y = h / 2 - (lvl / maxScale) * (h / 2 * 0.9);

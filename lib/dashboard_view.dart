@@ -278,28 +278,7 @@ class ScopeTabContent extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF13111C),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF232035)),
-                  ),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: manager.filterEnabled,
-                        onChanged: (val) => manager.toggleFilter(val ?? true),
-                        activeColor: const Color(0xFF74C7EC),
-                      ),
-                      const Text(
-                        "Фильтр",
-                        style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 13, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(width: 12),
-                    ],
-                  ),
-                ),
+
               ],
             ),
           ],
@@ -1442,20 +1421,21 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
   Widget build(BuildContext context) {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
-    return Selector<RingBleManager, (bool, double, List<GestureRule>, bool, bool)>(
+    return Selector<RingBleManager, (bool, double, int, bool, bool)>(
       selector: (_, m) => (
         m.gestureActionsEnabled,
         m.gestureThreshold,
-        m.gestureRules,
+        m.rulesVersion,
         m.gestureTriggeredAlert,
         m.wakeGestureEnabled,
       ),
       builder: (context, data, _) {
         final gestureActionsEnabled = data.$1;
         final gestureThreshold = data.$2;
-        final gestureRules = data.$3;
+        // rulesVersion (data.$3) is used by Selector to trigger rebuilds
         final gestureTriggeredAlert = data.$4;
         final wakeGestureEnabled = data.$5;
+        final gestureRules = manager.gestureRules;
 
         return Scaffold(
           backgroundColor: Colors.transparent,
@@ -1975,6 +1955,8 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
     String postData = "";
     List<double> capturedTemplate = [];
 
+    manager.clearRecordedSamples();
+
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0F0F17),
@@ -1986,51 +1968,56 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            final double availableHeight = MediaQuery.of(context).size.height * 0.85 - MediaQuery.of(context).viewInsets.bottom;
             return Padding(
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(context).viewInsets.bottom,
               ),
               child: Container(
+                height: availableHeight,
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                child: SingleChildScrollView(
-                  child: Form(
-                    key: formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Center(
-                          child: Container(
-                            width: 42,
-                            height: 5,
-                            margin: const EdgeInsets.only(bottom: 16),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2E2A47),
-                              borderRadius: BorderRadius.circular(2.5),
-                            ),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 5,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2E2A47),
+                            borderRadius: BorderRadius.circular(2.5),
                           ),
                         ),
-                        Row(
-                          children: [
-                            const Icon(Icons.playlist_add_rounded, color: Color(0xFF74C7EC)),
-                            const SizedBox(width: 8),
-                            const Text(
-                              "Новое правило жеста",
-                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            const Spacer(),
-                            IconButton(
-                              icon: const Icon(Icons.close_rounded, color: Color(0xFF9E9BAC)),
-                              onPressed: () {
-                                if (manager.isRecordingGesture) {
-                                  manager.stopRecordingGesture();
-                                }
-                                Navigator.pop(context);
-                              },
-                            ),
-                          ],
-                        ),
-                        const Divider(color: Color(0xFF232035), height: 16),
+                      ),
+                      Row(
+                        children: [
+                          const Icon(Icons.playlist_add_rounded, color: Color(0xFF74C7EC)),
+                          const SizedBox(width: 8),
+                          const Text(
+                            "Новое правило жеста",
+                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, color: Color(0xFF9E9BAC)),
+                            onPressed: () {
+                              if (manager.isRecordingGesture) {
+                                manager.stopRecordingGesture();
+                              }
+                              Navigator.pop(context);
+                            },
+                          ),
+                        ],
+                      ),
+                      const Divider(color: Color(0xFF232035), height: 16),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
                         
                         // 1. Rule Name Input
                         const Text(
@@ -2147,13 +2134,13 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                       ),
                                       const SizedBox(height: 10),
                                       LinearProgressIndicator(
-                                        value: samplesCount / 75.0,
+                                        value: samplesCount / 150.0,
                                         backgroundColor: const Color(0xFF1E161C),
                                         color: const Color(0xFFF38BA8),
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
-                                        "Собрано точек ускорения: $samplesCount из 75",
+                                        "Собрано точек ускорения: $samplesCount из 150",
                                         style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
                                       ),
                                     ],
@@ -2161,7 +2148,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                 );
                               }
 
-                              if (samplesCount >= 75) {
+                              if (samplesCount >= 150) {
                                 capturedTemplate = List<double>.from(liveManager.recordedSamples);
                               }
 
@@ -2192,7 +2179,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        "Сохранено точек сигнала: ${capturedTemplate.length} (профиль 1.5 секунды)",
+                                        "Сохранено точек сигнала: ${capturedTemplate.length} (профиль 3.0 секунды)",
                                         style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
                                       ),
                                       const SizedBox(height: 12),
@@ -2344,53 +2331,56 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                             },
                             onSaved: (val) => postData = val ?? "",
                           ),
-                        ],
-                        const SizedBox(height: 24),
+                        ], // closes collection-if
+                      ], // closes inner Column children
+                    ), // closes inner Column
+                  ), // closes SingleChildScrollView
+                ), // closes Expanded
+                const SizedBox(height: 16),
 
-                        // Submit Button
-                        ElevatedButton(
-                          onPressed: () {
-                            if (triggerType == "custom" && capturedTemplate.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  backgroundColor: Color(0xFF3A1C1C),
-                                  content: Text(
-                                    "Вы выбрали пользовательский жест. Сначала запишите движение кольца!",
-                                    style: TextStyle(color: Color(0xFFF38BA8), fontWeight: FontWeight.bold),
-                                  ),
+                      // Submit Button
+                      ElevatedButton(
+                        onPressed: () {
+                          if (triggerType == "custom" && capturedTemplate.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                backgroundColor: Color(0xFF3A1C1C),
+                                content: Text(
+                                  "Вы выбрали пользовательский жест. Сначала запишите движение кольца!",
+                                  style: TextStyle(color: Color(0xFFF38BA8), fontWeight: FontWeight.bold),
                                 ),
-                              );
-                              return;
-                            }
+                              ),
+                            );
+                            return;
+                          }
 
-                            if (formKey.currentState!.validate()) {
-                              formKey.currentState!.save();
-                              final newRule = GestureRule(
-                                id: DateTime.now().millisecondsSinceEpoch.toString(),
-                                name: name,
-                                triggerType: triggerType,
-                                actionType: actionType,
-                                payload: payload,
-                                postData: postData.isNotEmpty ? postData : null,
-                                template: triggerType == "custom" ? capturedTemplate : null,
-                              );
-                              manager.addGestureRule(newRule);
-                              Navigator.pop(context);
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF74C7EC),
-                            foregroundColor: const Color(0xFF0B0A11),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: const Text(
-                            "Создать правило жеста",
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
+                          if (formKey.currentState!.validate()) {
+                            formKey.currentState!.save();
+                            final newRule = GestureRule(
+                              id: DateTime.now().millisecondsSinceEpoch.toString(),
+                              name: name,
+                              triggerType: triggerType,
+                              actionType: actionType,
+                              payload: payload,
+                              postData: postData.isNotEmpty ? postData : null,
+                              template: triggerType == "custom" ? capturedTemplate : null,
+                            );
+                            manager.addGestureRule(newRule);
+                            Navigator.pop(context);
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF74C7EC),
+                          foregroundColor: const Color(0xFF0B0A11),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                      ],
-                    ),
+                        child: const Text(
+                          "Создать правило жеста",
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -2398,6 +2388,11 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
           },
         );
       },
-    );
+    ).then((_) {
+      if (manager.isRecordingGesture) {
+        manager.stopRecordingGesture();
+      }
+      manager.clearRecordedSamples();
+    });
   }
 }

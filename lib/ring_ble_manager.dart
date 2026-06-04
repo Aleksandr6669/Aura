@@ -128,7 +128,6 @@ class RingBleManager extends ChangeNotifier {
   bool isConnected = false;
   String connectionStatus = "Scanning...";
   String batteryInfo = "-";
-  bool filterEnabled = true;
   List<BluetoothService> discoveredServicesList = [];
 
   // Real-time trace values
@@ -136,11 +135,6 @@ class RingBleManager extends ChangeNotifier {
   double lastY = 0.0;
   double lastZ = 0.0;
   double lastMag = 0.0;
-
-  // Smoothing variables (Low Pass Filter)
-  double _lastFx = 0.0;
-  double _lastFy = 0.0;
-  double _lastFz = 0.0;
 
   // History buffers for high-speed custom painter
   static const int maxPoints = 200;
@@ -155,6 +149,7 @@ class RingBleManager extends ChangeNotifier {
 
   // Custom mapped gesture rules list
   List<GestureRule> gestureRules = [];
+  int rulesVersion = 0;
 
   // App running indicator
   bool isDisposed = false;
@@ -193,11 +188,6 @@ class RingBleManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleFilter(bool enabled) {
-    filterEnabled = enabled;
-    addLog("Low-Pass Filter: ${enabled ? 'Enabled' : 'Disabled'}", tag: 'info');
-    notifyListeners();
-  }
 
   void toggleShowNameless(bool value) {
     showNamelessDevices = value;
@@ -241,6 +231,7 @@ class RingBleManager extends ChangeNotifier {
       final list = prefs.getStringList("gesture_rules");
       if (list != null) {
         gestureRules = list.map((s) => GestureRule.fromJson(jsonDecode(s))).toList();
+        rulesVersion++;
       } else {
         // Add default example rules
         gestureRules = [
@@ -278,6 +269,7 @@ class RingBleManager extends ChangeNotifier {
 
   void addGestureRule(GestureRule rule) {
     gestureRules.add(rule);
+    rulesVersion++;
     saveGestureRules();
     notifyListeners();
     addLog("Added gesture rule: ${rule.name}", tag: 'success');
@@ -288,6 +280,7 @@ class RingBleManager extends ChangeNotifier {
     if (idx != -1) {
       final name = gestureRules[idx].name;
       gestureRules.removeAt(idx);
+      rulesVersion++;
       saveGestureRules();
       notifyListeners();
       addLog("Removed gesture rule: $name", tag: 'info');
@@ -459,18 +452,25 @@ class RingBleManager extends ChangeNotifier {
 
     final liveNormalized = standardize(_liveMagnitudeWindow);
 
+    GestureRule? bestRule;
+    double minDistance = double.infinity;
+
     for (var rule in gestureRules) {
       if (rule.triggerType == "custom" && rule.template != null && rule.template!.isNotEmpty) {
         final templateNormalized = standardize(rule.template!);
         final dist = calculateDtw(liveNormalized, templateNormalized);
         
-        // Threshold: less than 26.0 is a match (standardized distance sum, relaxed for imprecise gestures)
-        if (dist < 26.0) {
-          _lastGestureTrigger = now;
-          _triggerCustomGestureAction(rule, dist);
-          break; // Trigger only one custom gesture at a time
+        if (dist < minDistance) {
+          minDistance = dist;
+          bestRule = rule;
         }
       }
+    }
+
+    // Threshold: less than 55.0 is a match (standardized distance sum, adjusted for 150 points)
+    if (bestRule != null && minDistance < 55.0) {
+      _lastGestureTrigger = now;
+      _triggerCustomGestureAction(bestRule, minDistance);
     }
   }
 
@@ -503,7 +503,7 @@ class RingBleManager extends ChangeNotifier {
 
     isRecordingGesture = true;
     recordedSamples.clear();
-    recordingCountdown = 3; // Max 3 seconds timeout
+    recordingCountdown = 5; // Max 5 seconds timeout
     notifyListeners();
     addLog("🔴 Recording gesture: Perform the movement now!", tag: 'info');
 
@@ -525,6 +525,14 @@ class RingBleManager extends ChangeNotifier {
     isRecordingGesture = false;
     notifyListeners();
     addLog("⏹️ Recording finished. Captured ${recordedSamples.length} samples.", tag: 'success');
+  }
+
+  void clearRecordedSamples() {
+    recordedSamples.clear();
+    isRecordingGesture = false;
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    notifyListeners();
   }
 
   Future<bool> _checkConnectedSystemDevices() async {
@@ -902,26 +910,9 @@ class RingBleManager extends ChangeNotifier {
         int accZ = ((data[4] << 4) | (data[5] & 0xF));
         if (accZ >= 2048) accZ -= 4096;
 
-        // Apply low pass filter if enabled
-        double rx = accX.toDouble();
-        double ry = accY.toDouble();
-        double rz = accZ.toDouble();
-
-        double currentX, currentY, currentZ;
-        if (filterEnabled) {
-          const double alpha = 0.25;
-          currentX = _lastFx + alpha * (rx - _lastFx);
-          currentY = _lastFy + alpha * (ry - _lastFy);
-          currentZ = _lastFz + alpha * (rz - _lastFz);
-        } else {
-          currentX = rx;
-          currentY = ry;
-          currentZ = rz;
-        }
-
-        _lastFx = currentX;
-        _lastFy = currentY;
-        _lastFz = currentZ;
+        double currentX = accX.toDouble();
+        double currentY = accY.toDouble();
+        double currentZ = accZ.toDouble();
 
         // Vector Magnitude calculation
         double currentMag = math.sqrt(currentX * currentX + currentY * currentY + currentZ * currentZ);
@@ -1153,22 +1144,22 @@ class RingBleManager extends ChangeNotifier {
     historyZ.add(z);
     historyMag.add(mag);
 
-    // If recording a custom gesture, collect samples (limit to 75 samples)
+    // If recording a custom gesture, collect samples (limit to 150 samples)
     if (isRecordingGesture) {
       recordedSamples.add(mag);
-      if (recordedSamples.length >= 75) {
+      if (recordedSamples.length >= 150) {
         stopRecordingGesture();
       }
     }
 
     // Update live sliding window for pattern matching
     _liveMagnitudeWindow.add(mag);
-    if (_liveMagnitudeWindow.length > 75) {
+    if (_liveMagnitudeWindow.length > 150) {
       _liveMagnitudeWindow.removeAt(0);
     }
 
     // Run custom gesture matching DTW checks
-    if (gestureActionsEnabled && !isRecordingGesture && _liveMagnitudeWindow.length == 75) {
+    if (gestureActionsEnabled && !isRecordingGesture && _liveMagnitudeWindow.length == 150) {
       _checkCustomGestures();
     }
   }
