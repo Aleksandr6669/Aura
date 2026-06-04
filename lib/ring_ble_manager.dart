@@ -820,6 +820,24 @@ class RingBleManager extends ChangeNotifier {
       addLog("BLE compatibility check failed: $e", tag: 'error');
     }
 
+    // Periodic watchdog timer to automatically reconnect if disconnected
+    Timer.periodic(const Duration(seconds: 20), (timer) async {
+      if (isDisposed) {
+        timer.cancel();
+        return;
+      }
+      if (!isConnected && connectedDevice == null && !userDisconnected) {
+        final prefs = await SharedPreferences.getInstance();
+        final savedId = prefs.getString("last_connected_device_id");
+        if (savedId != null) {
+          final foundSystemDevice = await _checkConnectedSystemDevices();
+          if (!foundSystemDevice && !isScanning) {
+            startManualScan();
+          }
+        }
+      }
+    });
+
     _scanningStateSub?.cancel();
     _scanningStateSub = FlutterBluePlus.isScanning.listen((scanning) {
       isScanning = scanning;
@@ -1511,8 +1529,11 @@ class RingBleManager extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final savedId = prefs.getString("last_connected_device_id");
       if (savedId != null) {
-        addLog("Saved device ID exists. Scanning to reconnect automatically...", tag: 'info');
-        startManualScan();
+        addLog("Saved device ID exists. Checking system devices or scanning to reconnect automatically...", tag: 'info');
+        final foundSystemDevice = await _checkConnectedSystemDevices();
+        if (!foundSystemDevice) {
+          startManualScan();
+        }
       }
     }
   }
