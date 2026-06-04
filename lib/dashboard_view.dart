@@ -357,7 +357,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
     // Rebuilds ONLY when settings or connection state changes
-    return Selector<RingBleManager, (bool, bool, double, String, String, bool, bool, double, bool)>(
+    return Selector<RingBleManager, (bool, bool, double, String, String, bool, bool, bool)>(
       selector: (_, m) => (
         m.isConnected,
         m.gestureActionsEnabled,
@@ -366,7 +366,6 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
         m.assignedActionPayload,
         m.gestureTriggeredAlert,
         m.wakeGestureEnabled,
-        m.wakeGestureThreshold,
         m.wakeGestureActive,
       ),
       builder: (context, data, _) {
@@ -377,8 +376,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
         final assignedActionPayload = data.$5;
         final gestureTriggeredAlert = data.$6;
         final wakeGestureEnabled = data.$7;
-        final wakeGestureThreshold = data.$8;
-        final wakeGestureActive = data.$9;
+        final wakeGestureActive = data.$8;
 
         // Update controller value only when not focused to avoid infinite rebuild loops
         if (_gesturePayloadController.text != assignedActionPayload && !_gestureFocusNode.hasFocus) {
@@ -551,8 +549,6 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-
                 // ─── Wake Gesture card ───────────────────────────────────
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
@@ -583,7 +579,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                           ),
                           const SizedBox(width: 6),
                           const Text(
-                            "WAKE GESTURE (ДВОЙНОЙ ТАП)",
+                            "WAKE GESTURE (ЖЕСТ КОЛЬЦА)",
                             style: TextStyle(
                               color: Color(0xFF89B4FA),
                               fontSize: 11,
@@ -615,7 +611,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                       ),
                       const SizedBox(height: 4),
                       const Text(
-                        "Двойной тап по кольцу включает/выключает прослушивание жестов — без огней.",
+                        "Жест подъема руки или резкого движения на самом кольце переключает режим прослушивания — полностью пассивно и без постоянного стриминга.",
                         style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
                       ),
                       const SizedBox(height: 12),
@@ -623,7 +619,7 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text(
-                            "Включить wake-жест",
+                            "Включить wake-жест кольца",
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 14,
@@ -641,21 +637,6 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                       ),
                       if (wakeGestureEnabled) ...[
                         const SizedBox(height: 8),
-                        Text(
-                          "Чувствительность: ${wakeGestureThreshold.toStringAsFixed(0)}",
-                          style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 12),
-                        ),
-                        Slider(
-                          value: wakeGestureThreshold,
-                          min: 800.0,
-                          max: 2500.0,
-                          divisions: 17,
-                          activeColor: const Color(0xFF89B4FA),
-                          inactiveColor: const Color(0xFF232035),
-                          onChanged: (val) {
-                            manager.saveGestureSettings(wakeThreshold: val);
-                          },
-                        ),
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
@@ -674,8 +655,8 @@ class _ControlsTabContentState extends State<ControlsTabContent> {
                               Expanded(
                                 child: Text(
                                   gestureActionsEnabled
-                                      ? "Прослушивание жестов: АКТИВНО — дважды тапни чтобы выключить"
-                                      : "Прослушивание жестов: ВЫКЛЮЧЕНО — дважды тапни чтобы включить",
+                                      ? "Прослушивание жестов: АКТИВНО — сделайте жест на кольце для выключения"
+                                      : "Прослушивание жестов: ВЫКЛЮЧЕНО — сделайте жест на кольце для включения",
                                   style: TextStyle(
                                     color: gestureActionsEnabled
                                         ? const Color(0xFFA6E3A1)

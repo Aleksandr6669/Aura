@@ -48,8 +48,14 @@ class DiscoveredDevice {
 
 class RingBleManager extends ChangeNotifier {
   BluetoothDevice? connectedDevice;
-  BluetoothCharacteristic? writeChar;
-  BluetoothCharacteristic? notifyChar;
+  final List<BluetoothCharacteristic> writeChars = [];
+  final List<BluetoothCharacteristic> notifyChars = [];
+  final List<StreamSubscription<List<int>>> _notifySubs = [];
+
+  BluetoothCharacteristic? get writeChar => writeChars.isNotEmpty ? writeChars.first : null;
+  BluetoothCharacteristic? get notifyChar => notifyChars.isNotEmpty ? notifyChars.first : null;
+
+  bool userDisconnected = false;
 
   bool isConnected = false;
   String connectionStatus = "Scanning...";
@@ -90,17 +96,10 @@ class RingBleManager extends ChangeNotifier {
   bool showNamelessDevices = false;
   DateTime? _lastGestureTrigger;
   bool gestureTriggeredAlert = false;
-
-  // Wake gesture (double-tap to toggle listening mode, no LEDs)
   bool wakeGestureEnabled = false;
-  double wakeGestureThreshold = 1400.0;
-  DateTime? _lastWakePeak;         // timestamp of first peak
-  bool _waitingForSecondPeak = false;
-  bool wakeGestureActive = false;  // visual indicator in UI
-
+  bool wakeGestureActive = false;
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
-  StreamSubscription<List<int>>? _notifySub;
   StreamSubscription<bool>? _scanningStateSub;
 
   void addLog(String text, {String tag = 'info'}) {
@@ -144,7 +143,6 @@ class RingBleManager extends ChangeNotifier {
       assignedActionType = prefs.getString("assigned_action_type") ?? "webhook";
       assignedActionPayload = prefs.getString("assigned_action_payload") ?? "";
       wakeGestureEnabled = prefs.getBool("wake_gesture_enabled") ?? false;
-      wakeGestureThreshold = prefs.getDouble("wake_gesture_threshold") ?? 1400.0;
       notifyListeners();
     } catch (e) {
       addLog("Failed to load gesture settings: $e", tag: 'warn');
@@ -157,7 +155,6 @@ class RingBleManager extends ChangeNotifier {
     String? type,
     String? payload,
     bool? wakeEnabled,
-    double? wakeThreshold,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -181,48 +178,10 @@ class RingBleManager extends ChangeNotifier {
         wakeGestureEnabled = wakeEnabled;
         await prefs.setBool("wake_gesture_enabled", wakeEnabled);
       }
-      if (wakeThreshold != null) {
-        wakeGestureThreshold = wakeThreshold;
-        await prefs.setDouble("wake_gesture_threshold", wakeThreshold);
-      }
       notifyListeners();
     } catch (e) {
       addLog("Failed to save gesture settings: $e", tag: 'warn');
     }
-  }
-
-  /// Detects a double-tap wake gesture (two acceleration peaks within 700ms).
-  /// Silently toggles [gestureActionsEnabled] — no LED commands are sent.
-  void _checkWakeGesture() {
-    if (!wakeGestureEnabled) return;
-    if (lastMag < wakeGestureThreshold) return;
-
-    final now = DateTime.now();
-
-    if (_waitingForSecondPeak && _lastWakePeak != null) {
-      final elapsed = now.difference(_lastWakePeak!).inMilliseconds;
-      if (elapsed > 150 && elapsed < 700) {
-        // ✅ Double-tap confirmed
-        _waitingForSecondPeak = false;
-        _lastWakePeak = null;
-        _triggerWakeToggle();
-        return;
-      } else if (elapsed >= 700) {
-        // Too slow — treat as a new first peak
-        _waitingForSecondPeak = false;
-      }
-    }
-
-    // Register first peak
-    _lastWakePeak = now;
-    _waitingForSecondPeak = true;
-
-    // Auto-reset if no second peak arrives
-    Future.delayed(const Duration(milliseconds: 750), () {
-      if (_waitingForSecondPeak) {
-        _waitingForSecondPeak = false;
-      }
-    });
   }
 
   void _triggerWakeToggle() {
@@ -285,6 +244,7 @@ class RingBleManager extends ChangeNotifier {
 
   Future<bool> _checkConnectedSystemDevices() async {
     if (isConnected || connectedDevice != null) return true;
+    if (userDisconnected) return false;
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedId = prefs.getString("last_connected_device_id");
@@ -299,7 +259,6 @@ class RingBleManager extends ChangeNotifier {
       try {
         connectedSystem = await FlutterBluePlus.systemDevices(systemServiceUuids);
       } catch (e) {
-        // Fallback in case systemDevices signature differs or we need to try without params
         try {
           connectedSystem = await FlutterBluePlus.systemDevices([]);
         } catch (e2) {
@@ -350,6 +309,8 @@ class RingBleManager extends ChangeNotifier {
 
     _scanSub?.cancel();
     _scanSub = FlutterBluePlus.scanResults.listen((results) async {
+      if (userDisconnected) return;
+
       // 1. Mark existing discovered devices as not present first if they aren't in results
       final latestIds = results.map((r) => r.device.remoteId).toSet();
       for (var d in discoveredDevices) {
@@ -419,6 +380,8 @@ class RingBleManager extends ChangeNotifier {
   void startManualScan() async {
     if (isConnected || connectedDevice != null) return;
 
+    userDisconnected = false;
+
     final foundSystemDevice = await _checkConnectedSystemDevices();
     if (foundSystemDevice) return;
 
@@ -449,6 +412,7 @@ class RingBleManager extends ChangeNotifier {
 
   void connectToDevice(BluetoothDevice device) async {
     stopManualScan();
+    userDisconnected = false;
 
     if (connectedDevice != null) {
       disconnectDevice();
@@ -497,12 +461,13 @@ class RingBleManager extends ChangeNotifier {
   void disconnectDevice() async {
     if (connectedDevice != null) {
       addLog("Disconnecting from device...", tag: 'info');
+      userDisconnected = true;
 
       // Disable sensors before disconnecting (prevents ring staying in active mode)
-      if (writeChar != null && isConnected) {
+      if (writeChars.isNotEmpty && isConnected) {
         try {
           final disableCmd = createCommand("a102");
-          await writeChar!.write(disableCmd, withoutResponse: true);
+          await writeChars.first.write(disableCmd, withoutResponse: true);
           addLog("Sensors disabled (a102) before disconnect", tag: 'info');
           await Future.delayed(const Duration(milliseconds: 200));
         } catch (e) {
@@ -534,45 +499,49 @@ class RingBleManager extends ChangeNotifier {
       await Future.delayed(const Duration(milliseconds: 600));
       final services = await device.discoverServices();
       
-      writeChar = null;
-      notifyChar = null;
+      writeChars.clear();
+      notifyChars.clear();
 
       for (var service in services) {
         for (var char in service.characteristics) {
           final cUuid = char.uuid.toString().toLowerCase();
           
-          if (cUuid == rxtxWriteCharacteristicUuid.toLowerCase()) {
-            writeChar = char;
+          if (cUuid == rxtxWriteCharacteristicUuid.toLowerCase() ||
+              cUuid == mainWriteCharacteristicUuid.toLowerCase()) {
+            writeChars.add(char);
           }
-          if (cUuid == rxtxNotifyCharacteristicUuid.toLowerCase()) {
-            notifyChar = char;
-          }
-          
-          if (writeChar == null && cUuid == mainWriteCharacteristicUuid.toLowerCase()) {
-            writeChar = char;
-          }
-          if (notifyChar == null && cUuid == mainNotifyCharacteristicUuid.toLowerCase()) {
-            notifyChar = char;
+          if (cUuid == rxtxNotifyCharacteristicUuid.toLowerCase() ||
+              cUuid == mainNotifyCharacteristicUuid.toLowerCase()) {
+            notifyChars.add(char);
           }
         }
       }
 
-      if (notifyChar != null && writeChar != null) {
-        addLog("UART notify and write characteristics discovered.", tag: 'success');
+      if (notifyChars.isNotEmpty && writeChars.isNotEmpty) {
+        addLog("UART/Main characteristics discovered: ${writeChars.length} write, ${notifyChars.length} notify.", tag: 'success');
         
         // Start notifications subscription
-        await notifyChar!.setNotifyValue(true);
-        _notifySub?.cancel();
-        _notifySub = notifyChar!.onValueReceived.listen((data) {
-          _parseNotificationData(data);
-        });
+        for (var sub in _notifySubs) {
+          sub.cancel();
+        }
+        _notifySubs.clear();
+
+        for (var char in notifyChars) {
+          try {
+            await char.setNotifyValue(true);
+            final sub = char.onValueReceived.listen((data) {
+              _parseNotificationData(data);
+            });
+            _notifySubs.add(sub);
+          } catch (e) {
+            addLog("Failed to subscribe to ${char.uuid}: $e", tag: 'warn');
+          }
+        }
 
         // Instantly query battery level
         await writeCommand("03");
 
-        // Instantly send enable sensor command (a104)
-        await writeCommand("a104");
-        addLog("Sensors command enabled (a104)", tag: 'success');
+        addLog("Ring ready. Click 'Enable Sensor (a104)' in Controls tab to view real-time data.", tag: 'info');
       } else {
         addLog("Error: Could not map GATT interface characteristics", tag: 'error');
       }
@@ -632,9 +601,6 @@ class RingBleManager extends ChangeNotifier {
         historyZ.add(lastZ);
         historyMag.add(lastMag);
 
-        // Wake gesture check (double-tap, no LEDs)
-        _checkWakeGesture();
-
         // Gesture action check
         if (gestureActionsEnabled) {
           if (lastMag > gestureThreshold) {
@@ -661,7 +627,6 @@ class RingBleManager extends ChangeNotifier {
     else if (data[0] == 0x14) {
       final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       addLog("👆 GESTURE EVENT [0x14]: $hex", tag: 'success');
-      // If the ring itself reports a gesture, toggle listening mode silently
       if (wakeGestureEnabled) {
         _triggerWakeToggle();
       }
@@ -684,17 +649,19 @@ class RingBleManager extends ChangeNotifier {
   }
 
   Future<void> writeCommand(String hexString) async {
-    if (writeChar == null || !isConnected) return;
+    if (writeChars.isEmpty || !isConnected) return;
     try {
       final bytes = createCommand(hexString);
-      await writeChar!.write(bytes, withoutResponse: true);
+      for (var char in writeChars) {
+        await char.write(bytes, withoutResponse: true);
+      }
     } catch (e) {
       addLog("Transmission error: $e", tag: 'error');
     }
   }
 
   Future<void> sendMorse(String text) async {
-    if (writeChar == null || !isConnected) {
+    if (writeChars.isEmpty || !isConnected) {
       addLog("Cannot blink Morse: device not connected", tag: 'error');
       return;
     }
@@ -731,14 +698,18 @@ class RingBleManager extends ChangeNotifier {
         if (isDisposed || !isConnected) break;
         final symbol = symbols[s];
 
-        await writeChar!.write(onCmd, withoutResponse: true);
+        for (var char in writeChars) {
+          await char.write(onCmd, withoutResponse: true);
+        }
         if (symbol == '.') {
           await Future.delayed(const Duration(milliseconds: 400));
         } else {
           await Future.delayed(const Duration(milliseconds: 1200));
         }
 
-        await writeChar!.write(offCmd, withoutResponse: true);
+        for (var char in writeChars) {
+          await char.write(offCmd, withoutResponse: true);
+        }
         await Future.delayed(const Duration(milliseconds: 400));
       }
 
@@ -761,19 +732,22 @@ class RingBleManager extends ChangeNotifier {
   void _handleDisconnect({bool autoScanReconnect = true}) async {
     isConnected = false;
     connectedDevice = null;
-    writeChar = null;
-    notifyChar = null;
+    writeChars.clear();
+    notifyChars.clear();
     batteryInfo = "-";
     
     _connSub?.cancel();
-    _notifySub?.cancel();
+    for (var sub in _notifySubs) {
+      sub.cancel();
+    }
+    _notifySubs.clear();
     
     connectionStatus = "Disconnected";
     notifyListeners();
     addLog("Ring disconnected.", tag: 'warn');
 
     // Auto-scan and reconnect in the background if there's a saved device ID
-    if (!isDisposed && autoScanReconnect) {
+    if (!isDisposed && autoScanReconnect && !userDisconnected) {
       final prefs = await SharedPreferences.getInstance();
       final savedId = prefs.getString("last_connected_device_id");
       if (savedId != null) {
@@ -788,13 +762,18 @@ class RingBleManager extends ChangeNotifier {
     isDisposed = true;
     _scanSub?.cancel();
     _connSub?.cancel();
-    _notifySub?.cancel();
+    for (var sub in _notifySubs) {
+      sub.cancel();
+    }
+    _notifySubs.clear();
     _scanningStateSub?.cancel();
     
     // Shut down sensors before disposing to save battery
-    if (writeChar != null && isConnected) {
+    if (writeChars.isNotEmpty && isConnected) {
       final disableCmd = createCommand("a102");
-      writeChar!.write(disableCmd, withoutResponse: true).catchError((_) {});
+      for (var char in writeChars) {
+        char.write(disableCmd, withoutResponse: true).catchError((_) {});
+      }
     }
 
     super.dispose();
