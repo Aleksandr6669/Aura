@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
@@ -16,6 +17,50 @@ const String rxtxNotifyCharacteristicUuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9
 // Ring Selection Details
 const String defaultMac = "B0:24:08:02:06:87";
 final List<String> deviceKeywords = ["SSR", "RING"];
+
+class SensorPoint {
+  final double x;
+  final double y;
+  final double z;
+  final double mag;
+  SensorPoint(this.x, this.y, this.z, this.mag);
+}
+
+class GestureRule {
+  final String id;
+  final String name;
+  final String triggerType; // "shake" or "wrist_tap"
+  final String actionType;  // "get", "post", "ble_command"
+  final String payload;     // URL or BLE HEX command
+  final String? postData;   // JSON payload for POST (optional)
+
+  GestureRule({
+    required this.id,
+    required this.name,
+    required this.triggerType,
+    required this.actionType,
+    required this.payload,
+    this.postData,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'triggerType': triggerType,
+    'actionType': actionType,
+    'payload': payload,
+    'postData': postData,
+  };
+
+  factory GestureRule.fromJson(Map<String, dynamic> json) => GestureRule(
+    id: json['id'],
+    name: json['name'],
+    triggerType: json['triggerType'],
+    actionType: json['actionType'],
+    payload: json['payload'],
+    postData: json['postData'],
+  );
+}
 
 class LogMessage {
   final String timestamp;
@@ -73,7 +118,6 @@ class RingBleManager extends ChangeNotifier {
   }
 
   bool userDisconnected = false;
-  DateTime? _lastNotifyTime;
 
   bool isConnected = false;
   String connectionStatus = "Scanning...";
@@ -98,6 +142,13 @@ class RingBleManager extends ChangeNotifier {
   final List<double> historyY = List.filled(maxPoints, 0.0, growable: true);
   final List<double> historyZ = List.filled(maxPoints, 0.0, growable: true);
   final List<double> historyMag = List.filled(maxPoints, 0.0, growable: true);
+
+  // Smooth playback buffer for iOS Bluetooth batching/jitter
+  final List<SensorPoint> _pendingPoints = [];
+  Timer? _playbackTimer;
+
+  // Custom mapped gesture rules list
+  List<GestureRule> gestureRules = [];
 
   // App running indicator
   bool isDisposed = false;
@@ -162,9 +213,69 @@ class RingBleManager extends ChangeNotifier {
       assignedActionType = prefs.getString("assigned_action_type") ?? "webhook";
       assignedActionPayload = prefs.getString("assigned_action_payload") ?? "";
       wakeGestureEnabled = prefs.getBool("wake_gesture_enabled") ?? false;
+      await loadGestureRules();
       notifyListeners();
     } catch (e) {
       addLog("Failed to load gesture settings: $e", tag: 'warn');
+    }
+  }
+
+  Future<void> loadGestureRules() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList("gesture_rules");
+      if (list != null) {
+        gestureRules = list.map((s) => GestureRule.fromJson(jsonDecode(s))).toList();
+      } else {
+        // Add default example rules
+        gestureRules = [
+          GestureRule(
+            id: "default_shake",
+            name: "Vibrate / Disable (Example BLE)",
+            triggerType: "shake",
+            actionType: "ble_command",
+            payload: "a102",
+          ),
+          GestureRule(
+            id: "default_webhook",
+            name: "Query Server (Example GET)",
+            triggerType: "wrist_tap",
+            actionType: "get",
+            payload: "https://httpbin.org/get",
+          ),
+        ];
+        await saveGestureRules();
+      }
+    } catch (e) {
+      addLog("Failed to load gesture rules: $e", tag: 'warn');
+    }
+  }
+
+  Future<void> saveGestureRules() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = gestureRules.map((r) => jsonEncode(r.toJson())).toList();
+      await prefs.setStringList("gesture_rules", list);
+    } catch (e) {
+      addLog("Failed to save gesture rules: $e", tag: 'warn');
+    }
+  }
+
+  void addGestureRule(GestureRule rule) {
+    gestureRules.add(rule);
+    saveGestureRules();
+    notifyListeners();
+    addLog("Added gesture rule: ${rule.name}", tag: 'success');
+  }
+
+  void removeGestureRule(String id) {
+    final idx = gestureRules.indexWhere((r) => r.id == id);
+    if (idx != -1) {
+      final name = gestureRules[idx].name;
+      gestureRules.removeAt(idx);
+      saveGestureRules();
+      notifyListeners();
+      addLog("Removed gesture rule: $name", tag: 'info');
     }
   }
 
@@ -235,29 +346,46 @@ class RingBleManager extends ChangeNotifier {
       notifyListeners();
     });
 
-    if (assignedActionPayload.isEmpty) {
-      addLog("No action payload configured for gestures", tag: 'warn');
-      return;
-    }
+    _triggerRulesFor("shake");
+  }
 
-    if (assignedActionType == "webhook") {
-      final urlStr = assignedActionPayload.trim();
-      addLog("Triggering Webhook: $urlStr...", tag: 'info');
-      try {
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(seconds: 5);
-        final uri = Uri.parse(urlStr);
-        final request = await client.getUrl(uri);
-        final response = await request.close();
-        addLog("Webhook response code: ${response.statusCode}", tag: 'success');
-        client.close();
-      } catch (e) {
-        addLog("Webhook trigger failed: $e", tag: 'error');
+  void _triggerRulesFor(String triggerType) async {
+    final rules = gestureRules.where((r) => r.triggerType == triggerType).toList();
+    if (rules.isEmpty) return;
+
+    for (var rule in rules) {
+      addLog("Executing action '${rule.name}'...", tag: 'info');
+      if (rule.actionType == "ble_command") {
+        await writeCommand(rule.payload);
+      } else if (rule.actionType == "get") {
+        try {
+          final client = HttpClient();
+          client.connectionTimeout = const Duration(seconds: 5);
+          final uri = Uri.parse(rule.payload.trim());
+          final request = await client.getUrl(uri);
+          final response = await request.close();
+          addLog("GET '${rule.name}' response: ${response.statusCode}", tag: 'success');
+          client.close();
+        } catch (e) {
+          addLog("GET '${rule.name}' failed: $e", tag: 'error');
+        }
+      } else if (rule.actionType == "post") {
+        try {
+          final client = HttpClient();
+          client.connectionTimeout = const Duration(seconds: 5);
+          final uri = Uri.parse(rule.payload.trim());
+          final request = await client.postUrl(uri);
+          request.headers.set('content-type', 'application/json');
+          if (rule.postData != null && rule.postData!.isNotEmpty) {
+            request.add(utf8.encode(rule.postData!));
+          }
+          final response = await request.close();
+          addLog("POST '${rule.name}' response: ${response.statusCode}", tag: 'success');
+          client.close();
+        } catch (e) {
+          addLog("POST '${rule.name}' failed: $e", tag: 'error');
+        }
       }
-    } else if (assignedActionType == "ble_command") {
-      final cmd = assignedActionPayload.trim();
-      addLog("Triggering BLE command: $cmd", tag: 'info');
-      await writeCommand(cmd);
     }
   }
 
@@ -641,38 +769,28 @@ class RingBleManager extends ChangeNotifier {
         double ry = accY.toDouble();
         double rz = accZ.toDouble();
 
+        double currentX, currentY, currentZ;
         if (filterEnabled) {
           const double alpha = 0.25;
-          lastX = _lastFx + alpha * (rx - _lastFx);
-          lastY = _lastFy + alpha * (ry - _lastFy);
-          lastZ = _lastFz + alpha * (rz - _lastFz);
+          currentX = _lastFx + alpha * (rx - _lastFx);
+          currentY = _lastFy + alpha * (ry - _lastFy);
+          currentZ = _lastFz + alpha * (rz - _lastFz);
         } else {
-          lastX = rx;
-          lastY = ry;
-          lastZ = rz;
+          currentX = rx;
+          currentY = ry;
+          currentZ = rz;
         }
 
-        _lastFx = lastX;
-        _lastFy = lastY;
-        _lastFz = lastZ;
+        _lastFx = currentX;
+        _lastFy = currentY;
+        _lastFz = currentZ;
 
         // Vector Magnitude calculation
-        lastMag = math.sqrt(lastX * lastX + lastY * lastY + lastZ * lastZ);
-
-        // Shift and update history lists
-        historyX.removeAt(0);
-        historyY.removeAt(0);
-        historyZ.removeAt(0);
-        historyMag.removeAt(0);
-
-        historyX.add(lastX);
-        historyY.add(lastY);
-        historyZ.add(lastZ);
-        historyMag.add(lastMag);
+        double currentMag = math.sqrt(currentX * currentX + currentY * currentY + currentZ * currentZ);
 
         // Gesture action check
         if (gestureActionsEnabled) {
-          if (lastMag > gestureThreshold) {
+          if (currentMag > gestureThreshold) {
             final now = DateTime.now();
             if (_lastGestureTrigger == null || now.difference(_lastGestureTrigger!) > const Duration(seconds: 2)) {
               _lastGestureTrigger = now;
@@ -681,11 +799,12 @@ class RingBleManager extends ChangeNotifier {
           }
         }
 
-        // Throttle UI notification updates to ~60Hz to maintain smooth rendering
-        final now = DateTime.now();
-        if (_lastNotifyTime == null || now.difference(_lastNotifyTime!) > const Duration(milliseconds: 16)) {
-          _lastNotifyTime = now;
-          notifyListeners();
+        // Add to the playback queue
+        _pendingPoints.add(SensorPoint(currentX, currentY, currentZ, currentMag));
+
+        // Start playback timer automatically if not running
+        if (_playbackTimer == null) {
+          _startPlaybackTimer();
         }
       }
     }
@@ -703,6 +822,9 @@ class RingBleManager extends ChangeNotifier {
       addLog("👆 GESTURE EVENT [0x14]: $hex", tag: 'success');
       if (wakeGestureEnabled) {
         _triggerWakeToggle();
+      }
+      if (gestureActionsEnabled) {
+        _triggerRulesFor("wrist_tap");
       }
     }
     // 4. Activity/step event packets
@@ -827,6 +949,7 @@ class RingBleManager extends ChangeNotifier {
 
   Future<void> startStream() async {
     if (!isConnected) return;
+    _startPlaybackTimer();
     addLog("Initiating high-frequency sensor stream...", tag: 'info');
     // Send standard setup/metrics command (tells ring to activate streaming parameters)
     await writeCommand("0a0200");
@@ -837,8 +960,60 @@ class RingBleManager extends ChangeNotifier {
 
   Future<void> stopStream() async {
     if (!isConnected) return;
+    _stopPlaybackTimer();
     addLog("Terminating sensor stream...", tag: 'info');
     await writeCommand("a102");
+  }
+
+  void _startPlaybackTimer() {
+    _playbackTimer?.cancel();
+    _playbackTimer = Timer.periodic(const Duration(milliseconds: 20), (timer) {
+      if (_pendingPoints.isEmpty) {
+        // If queue is empty, push last values to keep graph moving
+        _pushToHistory(lastX, lastY, lastZ, lastMag);
+        notifyListeners();
+        return;
+      }
+
+      // Check queue size to catch up if iOS batching introduces too much delay
+      int pointsToProcess = 1;
+      if (_pendingPoints.length > 150) {
+        pointsToProcess = 4;
+      } else if (_pendingPoints.length > 50) {
+        pointsToProcess = 2;
+      }
+
+      for (int i = 0; i < pointsToProcess; i++) {
+        if (_pendingPoints.isEmpty) break;
+        final point = _pendingPoints.removeAt(0);
+
+        lastX = point.x;
+        lastY = point.y;
+        lastZ = point.z;
+        lastMag = point.mag;
+
+        _pushToHistory(point.x, point.y, point.z, point.mag);
+      }
+      notifyListeners();
+    });
+  }
+
+  void _stopPlaybackTimer() {
+    _playbackTimer?.cancel();
+    _playbackTimer = null;
+    _pendingPoints.clear();
+  }
+
+  void _pushToHistory(double x, double y, double z, double mag) {
+    historyX.removeAt(0);
+    historyY.removeAt(0);
+    historyZ.removeAt(0);
+    historyMag.removeAt(0);
+
+    historyX.add(x);
+    historyY.add(y);
+    historyZ.add(z);
+    historyMag.add(mag);
   }
 
   void _handleDisconnect({bool autoScanReconnect = true}) async {
@@ -848,6 +1023,7 @@ class RingBleManager extends ChangeNotifier {
     notifyChars.clear();
     discoveredServicesList.clear();
     batteryInfo = "-";
+    _stopPlaybackTimer();
     
     _connSub?.cancel();
     for (var sub in _notifySubs) {
@@ -873,6 +1049,7 @@ class RingBleManager extends ChangeNotifier {
   @override
   void dispose() {
     isDisposed = true;
+    _stopPlaybackTimer();
     _scanSub?.cancel();
     _connSub?.cancel();
     for (var sub in _notifySubs) {
