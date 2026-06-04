@@ -1361,6 +1361,8 @@ class RingBleManager extends ChangeNotifier {
   void dispose() {
     isDisposed = true;
     _stopPlaybackTimer();
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
     _scanSub?.cancel();
     _connSub?.cancel();
     for (var sub in _notifySubs) {
