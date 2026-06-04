@@ -205,6 +205,7 @@ class RingBleManager extends ChangeNotifier {
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<bool>? _scanningStateSub;
+  Timer? _batteryTimer;
 
   void addLog(String text, {String tag = 'info'}) {
     logs.add(LogMessage(text, tag: tag));
@@ -1012,6 +1013,16 @@ class RingBleManager extends ChangeNotifier {
 
         // Instantly query battery level
         await writeCommand("03");
+
+        // Start battery monitoring timer (every 5 seconds)
+        _batteryTimer?.cancel();
+        _batteryTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+          if (isConnected) {
+            writeCommand("03");
+          } else {
+            timer.cancel();
+          }
+        });
 
         if (gestureActionsEnabled) {
           await startStream();
