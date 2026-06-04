@@ -636,7 +636,7 @@ class RingBleManager extends ChangeNotifier {
     _silenceTimer = null;
     isRecordingGesture = false;
     isWaitingForGesture = false;
-    if (recordedSamples.length >= 10) {
+    if (recordedSamples.length >= 2) {
       recordingDone = true;
       recordingStatusMessage = "";
       addLog("✅ Жест записан: ${recordedSamples.length} точек (~${(recordedSamples.length / 50.0).toStringAsFixed(1)} сек)", tag: 'success');
@@ -681,6 +681,9 @@ class RingBleManager extends ChangeNotifier {
     _recordingTimer = null;
     _silenceTimer?.cancel();
     _silenceTimer = null;
+    if (!gestureActionsEnabled) {
+      stopStream();
+    }
     notifyListeners();
   }
 
