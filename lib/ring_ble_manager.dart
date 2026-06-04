@@ -126,6 +126,7 @@ class RingBleManager extends ChangeNotifier {
   bool userDisconnected = false;
 
   bool isConnected = false;
+  bool get isStreaming => _playbackTimer != null;
   String connectionStatus = "Scanning...";
   String batteryInfo = "-";
   List<BluetoothService> discoveredServicesList = [];
@@ -321,6 +322,11 @@ class RingBleManager extends ChangeNotifier {
       if (enabled != null) {
         gestureActionsEnabled = enabled;
         await prefs.setBool("gesture_actions_enabled", enabled);
+        if (enabled) {
+          await startStream();
+        } else {
+          await stopStream();
+        }
       }
       if (threshold != null) {
         gestureThreshold = threshold;
@@ -353,6 +359,12 @@ class RingBleManager extends ChangeNotifier {
     SharedPreferences.getInstance().then((prefs) {
       prefs.setBool("gesture_actions_enabled", gestureActionsEnabled);
     });
+
+    if (gestureActionsEnabled) {
+      startStream();
+    } else {
+      stopStream();
+    }
 
     addLog(
       "⚡ Wake gesture: listening ${gestureActionsEnabled ? 'ON ✓' : 'OFF ✗'}",
@@ -633,6 +645,9 @@ class RingBleManager extends ChangeNotifier {
       recordedSamples.clear();
       addLog("⚠️ Жест слишком короткий (${recordedSamples.length} точек)", tag: 'warn');
     }
+    if (!gestureActionsEnabled) {
+      stopStream();
+    }
     notifyListeners();
   }
 
@@ -647,6 +662,9 @@ class RingBleManager extends ChangeNotifier {
     _baselineWindow.clear();
     recordedSamples.clear();
     recordingStatusMessage = reason;
+    if (!gestureActionsEnabled) {
+      stopStream();
+    }
     notifyListeners();
     addLog("❌ $reason", tag: 'warn');
   }
@@ -1015,7 +1033,11 @@ class RingBleManager extends ChangeNotifier {
         // Instantly query battery level
         await writeCommand("03");
 
-        addLog("Ring ready. Press 'Start' to stream data.", tag: 'info');
+        if (gestureActionsEnabled) {
+          await startStream();
+        } else {
+          addLog("Ring ready. Turn on gesture actions to stream data.", tag: 'info');
+        }
       } else {
         addLog("Error: Could not map GATT interface characteristics", tag: 'error');
       }

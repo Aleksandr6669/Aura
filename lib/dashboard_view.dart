@@ -262,54 +262,70 @@ class ScopeTabContent extends StatelessWidget {
             ),
             const SizedBox(height: 16),
 
-            // Fast controls
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () => manager.clearScope(),
-                    icon: const Icon(Icons.clear_all_rounded, size: 16),
-                    label: const Text("Очистить"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF201D30),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            // Stream status & toggle card
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: manager.isStreaming ? const Color(0xFF152A22) : const Color(0xFF1E1C2E),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: manager.isStreaming ? const Color(0xFF225741) : const Color(0xFF2E2A44),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    manager.isStreaming ? Icons.sensors_rounded : Icons.sensors_off_rounded,
+                    color: manager.isStreaming ? const Color(0xFFA6E3A1) : const Color(0xFFF38BA8),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          manager.isStreaming ? "Обработка жестов активна" : "Обработка жестов выключена",
+                          style: TextStyle(
+                            color: manager.isStreaming ? const Color(0xFFA6E3A1) : Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          manager.isStreaming
+                              ? "Кольцо передает данные и распознает жесты"
+                              : "Включите для запуска стрима и прослушивания",
+                          style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: manager.isConnected ? () => manager.startStream() : null,
-                    icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                    label: const Text("Старт"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1C3A27),
-                      foregroundColor: const Color(0xFFA6E3A1),
-                      disabledBackgroundColor: const Color(0xFF13111C),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
+                  Switch(
+                    value: manager.gestureActionsEnabled,
+                    onChanged: manager.isConnected
+                        ? (val) {
+                            manager.saveGestureSettings(enabled: val);
+                          }
+                        : null,
+                    activeThumbColor: const Color(0xFFA6E3A1),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: manager.isConnected ? () => manager.stopStream() : null,
-                    icon: const Icon(Icons.stop_rounded, size: 16),
-                    label: const Text("Стоп"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF3A1C1C),
-                      foregroundColor: const Color(0xFFF38BA8),
-                      disabledBackgroundColor: const Color(0xFF13111C),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
 
-              ],
+            // Clear history control
+            ElevatedButton.icon(
+              onPressed: () => manager.clearScope(),
+              icon: const Icon(Icons.clear_all_rounded, size: 16),
+              label: const Text("Очистить график"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF201D30),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
             ),
           ],
         ),
