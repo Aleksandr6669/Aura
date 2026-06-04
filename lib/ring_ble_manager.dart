@@ -1333,6 +1333,8 @@ class RingBleManager extends ChangeNotifier {
     discoveredServicesList.clear();
     batteryInfo = "-";
     _stopPlaybackTimer();
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
     
     _connSub?.cancel();
     for (var sub in _notifySubs) {
