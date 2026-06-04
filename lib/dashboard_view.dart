@@ -2266,21 +2266,33 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                     ElevatedButton.icon(
                                       onPressed: liveManager.isConnected
                                           ? () {
-                                              // Reset done flag so next recording starts fresh
-                                              if (hasRecorded) {
-                                                setModalState(() {
-                                                  capturedTemplate = [];
-                                                });
-                                                liveManager.clearRecordedSamples();
+                                              if (liveManager.isRecordingGesture) {
+                                                liveManager.stopRecordingGesture();
+                                              } else {
+                                                // Reset done flag so next recording starts fresh
+                                                if (hasRecorded) {
+                                                  setModalState(() {
+                                                    capturedTemplate = [];
+                                                  });
+                                                  liveManager.clearRecordedSamples();
+                                                }
+                                                liveManager.startRecordingGesture();
                                               }
-                                              liveManager.startRecordingGesture();
                                             }
                                           : null,
-                                      icon: Icon(hasRecorded ? Icons.refresh_rounded : Icons.fiber_manual_record_rounded),
-                                      label: Text(hasRecorded ? "Перезаписать жест" : "Начать запись (5 сек)"),
+                                      icon: Icon(liveManager.isRecordingGesture
+                                          ? Icons.stop_rounded
+                                          : (hasRecorded ? Icons.refresh_rounded : Icons.fiber_manual_record_rounded)),
+                                      label: Text(liveManager.isRecordingGesture
+                                          ? "Завершить запись"
+                                          : (hasRecorded ? "Перезаписать жест" : "Начать запись (5 сек)")),
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: hasRecorded ? const Color(0xFF232035) : const Color(0xFF2A1C2B),
-                                        foregroundColor: hasRecorded ? Colors.white : const Color(0xFFCBA6F7),
+                                        backgroundColor: liveManager.isRecordingGesture
+                                            ? const Color(0xFF3A1C1C)
+                                            : (hasRecorded ? const Color(0xFF232035) : const Color(0xFF2A1C2B)),
+                                        foregroundColor: liveManager.isRecordingGesture
+                                            ? const Color(0xFFF38BA8)
+                                            : (hasRecorded ? Colors.white : const Color(0xFFCBA6F7)),
                                         disabledBackgroundColor: const Color(0xFF181622),
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                       ),
