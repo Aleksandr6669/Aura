@@ -79,6 +79,8 @@ class _DashboardViewState extends State<DashboardView> {
           const ScopeTabContent(),
           // Tab 2: Devices
           const DevicesTabContent(),
+          // Tab 3: Logs
+          const LogsTabContent(),
         ],
       ),
       bottomNavigationBar: Container(
@@ -109,6 +111,11 @@ class _DashboardViewState extends State<DashboardView> {
               icon: Icon(Icons.bluetooth_searching_rounded),
               activeIcon: Icon(Icons.bluetooth_connected_rounded),
               label: "Devices",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.terminal_outlined),
+              activeIcon: Icon(Icons.terminal_rounded),
+              label: "Logs",
             ),
           ],
         ),
