@@ -1148,7 +1148,7 @@ class DevicesTabContent extends StatelessWidget {
                         Icon(Icons.info_outline_rounded, size: 10, color: Color(0xFFA6E3A1)),
                         SizedBox(width: 4),
                         Text(
-                          "Нажмите для просмотра сервисов и характеристик",
+                          "Нажмите для просмотра GATT сервисов",
                           style: TextStyle(color: Color(0xFFA6E3A1), fontSize: 10, fontWeight: FontWeight.w600),
                         ),
                       ],
@@ -1569,6 +1569,65 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                     ),
                   ),
                   const SizedBox(height: 16),
+
+                  // 2.5 Hardware Gesture Activation Card
+                  if (manager.isConnected) ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF13111C),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFF232035)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text(
+                            "НАСТРОЙКА ВСТРОЕННЫХ ЖЕСТОВ КОЛЬЦА",
+                            style: TextStyle(color: Color(0xFF89B4FA), fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            "Отправьте команды конфигурации на кольцо, чтобы активировать встроенное аппаратное распознавание движений.",
+                            style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 12),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => manager.writeCommand("050101"),
+                                  icon: const Icon(Icons.gesture_rounded, size: 14),
+                                  label: const Text("Активировать жест (050101)", style: TextStyle(fontSize: 10)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF1B3D30),
+                                    foregroundColor: const Color(0xFFA6E3A1),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => manager.writeCommand("050301"),
+                                  icon: const Icon(Icons.touch_app_rounded, size: 14),
+                                  label: const Text("Активировать тап (050301)", style: TextStyle(fontSize: 10)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF1B3D30),
+                                    foregroundColor: const Color(0xFFA6E3A1),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
                   // 3. Settings Card
                   Container(

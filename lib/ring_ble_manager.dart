@@ -204,6 +204,17 @@ class RingBleManager extends ChangeNotifier {
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<bool>? _scanningStateSub;
   Timer? _batteryTimer;
+  Timer? _streamTimeoutTimer;
+
+  void _resetStreamTimeout() {
+    _streamTimeoutTimer?.cancel();
+    _streamTimeoutTimer = Timer(const Duration(seconds: 30), () {
+      if (isStreaming && !isRecordingGesture && !isWaitingForGesture) {
+        addLog("⏰ Временное окно вышло (30 сек без жестов) — отключаем стрим для экономии батареи", tag: 'info');
+        stopStream();
+      }
+    });
+  }
 
   void addLog(String text, {String tag = 'info'}) {
     logs.add(LogMessage(text, tag: tag));
@@ -409,6 +420,7 @@ class RingBleManager extends ChangeNotifier {
   }
 
   void _triggerRulesFor(String triggerTypeOrId, {bool isManual = false}) async {
+    _resetStreamTimeout();
     final rules = gestureRules.where((r) => r.triggerType == triggerTypeOrId || r.id == triggerTypeOrId).toList();
     if (rules.isEmpty) return;
 
@@ -1101,6 +1113,7 @@ class RingBleManager extends ChangeNotifier {
               _activeMotionBuffer.clear();
               addLog("⚡ Начато движение для жеста...", tag: 'info');
             }
+            _resetStreamTimeout();
             _quietSampleCount = 0;
             _activeMotionBuffer.add(currentMag);
           } else {
@@ -1155,6 +1168,15 @@ class RingBleManager extends ChangeNotifier {
     else if (data[0] == 0x14) {
       final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       addLog("👆 GESTURE EVENT [0x14]: $hex", tag: 'success');
+
+      // Auto-start streaming to allow custom gestures, and set the 30s timeout
+      if (gestureActionsEnabled) {
+        if (!isStreaming) {
+          startStream();
+        }
+        _resetStreamTimeout();
+      }
+
       if (wakeGestureEnabled) {
         _triggerWakeToggle();
       }
@@ -1290,6 +1312,7 @@ class RingBleManager extends ChangeNotifier {
     await writeCommand("0a0200");
     await Future.delayed(const Duration(milliseconds: 300));
     await writeCommand("a104");
+    _resetStreamTimeout();
   }
 
   Future<void> stopStream() async {
