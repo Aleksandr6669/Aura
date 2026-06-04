@@ -2277,7 +2277,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                             }
                                           : null,
                                       icon: Icon(hasRecorded ? Icons.refresh_rounded : Icons.fiber_manual_record_rounded),
-                                      label: Text(hasRecorded ? "Перезаписать жест" : "Подготовить запись"),
+                                      label: Text(hasRecorded ? "Перезаписать жест" : "Начать запись (5 сек)"),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: hasRecorded ? const Color(0xFF232035) : const Color(0xFF2A1C2B),
                                         foregroundColor: hasRecorded ? Colors.white : const Color(0xFFCBA6F7),
