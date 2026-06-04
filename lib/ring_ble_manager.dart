@@ -572,8 +572,9 @@ class RingBleManager extends ChangeNotifier {
     // Trim the live gesture to match the same active motion bounds as the template
     final trimmedLive = trimActiveMotion(gestureData);
 
-    if (trimmedLive.length < 8) {
+    if (trimmedLive.length < 3) {
       // Too short to be a gesture
+      // (1Hz sample rate means a valid gesture can be 3-5 points)
       return;
     }
 
@@ -583,7 +584,7 @@ class RingBleManager extends ChangeNotifier {
     double bestNormalizedDist = double.infinity;
 
     for (var rule in gestureRules) {
-      if (rule.triggerType != "custom" || rule.template == null || rule.template!.length < 5) continue;
+      if (rule.triggerType != "custom" || rule.template == null || rule.template!.length < 3) continue;
 
       final liveNormalized = standardize(trimmedLive);
       final templateNormalized = standardize(rule.template!);
@@ -724,11 +725,11 @@ class RingBleManager extends ChangeNotifier {
     // Crop the recorded template to only contain the active motion shape
     final trimmed = trimActiveMotion(recordedSamples);
 
-    if (trimmed.length >= 8) {
+    if (trimmed.length >= 3) {
       recordedSamples = trimmed;
       recordingDone = true;
       recordingStatusMessage = "";
-      addLog("✅ Жест записан: ${recordedSamples.length} точек (~${(recordedSamples.length / 50.0).toStringAsFixed(1)} сек)", tag: 'success');
+      addLog("✅ Жест записан: ${recordedSamples.length} точек (~${(recordedSamples.length / 1.3).toStringAsFixed(1)} сек)", tag: 'success');
     } else {
       recordingStatusMessage = "Жест слишком короткий (${trimmed.length} точек) — попробуйте ещё раз";
       recordedSamples.clear();

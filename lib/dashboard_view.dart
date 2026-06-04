@@ -2345,7 +2345,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
-                                        "Собрано: $samplesCount точек (~${(samplesCount / 50.0).toStringAsFixed(1)} с)",
+                                        "Собрано: $samplesCount точек (~${(samplesCount / 1.3).toStringAsFixed(1)} с)",
                                         style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
                                         textAlign: TextAlign.center,
                                       ),
