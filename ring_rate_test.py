@@ -28,8 +28,32 @@ MAIN_NOTIFY_CHAR   = "de5bf729-d711-4e47-af26-65e3012a5dc7"
 RING_MAC  = "B0:24:08:02:06:87"
 RING_KEYWORDS = ["SSR", "RING"]
 
-# Команда запуска стрима акселерометра (из Dart-кода)
-START_STREAM_CMD = bytes.fromhex("a103")   # включить поток акселерометра
+
+def create_command(hex_string: str) -> bytes:
+    """
+    Точная копия Dart createCommand():
+      1. hex → bytes
+      2. pad to 15 bytes with 0x00
+      3. append CRC = sum(all_bytes) & 0xFF
+    Result is always 16 bytes.
+    """
+    cleaned = hex_string.replace(" ", "").replace(":", "")
+    raw = bytes.fromhex(cleaned)
+    buf = list(raw)
+    while len(buf) < 15:
+        buf.append(0x00)
+    crc = sum(buf) & 0xFF
+    buf.append(crc)
+    hex_out = " ".join(f"{b:02X}" for b in buf)
+    print(f"  cmd {hex_string!r} → [{hex_out}]  ({len(buf)} bytes)")
+    return bytes(buf)
+
+
+# Команды (как в startStream() Dart-кода)
+CMD_METRICS  = create_command("0a0200")   # setup/metrics — первым
+CMD_STREAM_ON  = create_command("a104")   # включить акселерометр
+CMD_STREAM_OFF = create_command("a102")   # выключить
+CMD_BATTERY    = create_command("03")     # запрос заряда
 
 # ── Состояние замера ────────────────────────────────────────────────────────
 packet_count   = 0
@@ -169,14 +193,28 @@ async def main():
             print(f"[{ts()}] ❌ Не удалось подписаться ни на один notify char!")
             return
 
-        # Отправляем команду старта стрима акселерометра
-        for write_uuid in [RXTX_WRITE_CHAR, MAIN_WRITE_CHAR]:
+        # Отправляем команды запуска стрима — точно как в Dart startStream():
+        #   1. writeCommand("0a0200")   ← setup/metrics
+        #   2. delay 300ms
+        #   3. writeCommand("a104")     ← включить акселерометр
+        write_uuid = RXTX_WRITE_CHAR
+        try:
+            print(f"[{ts()}] ▶️  Отправка setup команды (0a0200)...")
+            await client.write_gatt_char(write_uuid, CMD_METRICS, response=False)
+            await asyncio.sleep(0.3)   # 300ms как в Dart
+            print(f"[{ts()}] ▶️  Включение акселерометра (a104)...")
+            await client.write_gatt_char(write_uuid, CMD_STREAM_ON, response=False)
+            print(f"[{ts()}] ✅ Стрим запущен!")
+        except Exception as e:
+            # Попробовать второй write char
             try:
-                await client.write_gatt_char(write_uuid, START_STREAM_CMD, response=False)
-                print(f"[{ts()}] ▶️  Команда старта стрима отправлена → {write_uuid}")
-                break
-            except Exception as e:
-                print(f"[{ts()}] ⚠️  Запись в {write_uuid}: {e}")
+                print(f"[{ts()}] ⚠️  RXTX failed ({e}), пробую MAIN write char...")
+                await client.write_gatt_char(MAIN_WRITE_CHAR, CMD_METRICS, response=False)
+                await asyncio.sleep(0.3)
+                await client.write_gatt_char(MAIN_WRITE_CHAR, CMD_STREAM_ON, response=False)
+                print(f"[{ts()}] ✅ Стрим запущен через MAIN char!")
+            except Exception as e2:
+                print(f"[{ts()}] ❌ Не удалось запустить стрим: {e2}")
 
         print(f"\n[{ts()}] Замер частоты данных... (Ctrl+C для выхода)\n")
 
