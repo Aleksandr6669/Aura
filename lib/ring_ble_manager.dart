@@ -29,10 +29,11 @@ class SensorPoint {
 class GestureRule {
   final String id;
   final String name;
-  final String triggerType; // "shake" or "wrist_tap"
+  final String triggerType; // "shake", "wrist_tap", or "custom"
   final String actionType;  // "get", "post", "ble_command"
   final String payload;     // URL or BLE HEX command
   final String? postData;   // JSON payload for POST (optional)
+  final List<double>? template; // acceleration magnitude profile
 
   GestureRule({
     required this.id,
@@ -41,6 +42,7 @@ class GestureRule {
     required this.actionType,
     required this.payload,
     this.postData,
+    this.template,
   });
 
   Map<String, dynamic> toJson() => {
@@ -50,6 +52,7 @@ class GestureRule {
     'actionType': actionType,
     'payload': payload,
     'postData': postData,
+    'template': template,
   };
 
   factory GestureRule.fromJson(Map<String, dynamic> json) => GestureRule(
@@ -59,6 +62,9 @@ class GestureRule {
     actionType: json['actionType'],
     payload: json['payload'],
     postData: json['postData'],
+    template: json['template'] != null
+        ? List<double>.from(json['template'].map((x) => (x as num).toDouble()))
+        : null,
   );
 }
 
@@ -168,6 +174,15 @@ class RingBleManager extends ChangeNotifier {
   bool gestureTriggeredAlert = false;
   bool wakeGestureEnabled = false;
   bool wakeGestureActive = false;
+
+  // Sliding window buffer for real-time custom gestures
+  final List<double> _liveMagnitudeWindow = [];
+
+  // Dynamic recording state variables
+  bool isRecordingGesture = false;
+  List<double> recordedSamples = [];
+  Timer? _recordingTimer;
+  int recordingCountdown = 0;
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<bool>? _scanningStateSub;
@@ -349,8 +364,8 @@ class RingBleManager extends ChangeNotifier {
     _triggerRulesFor("shake");
   }
 
-  void _triggerRulesFor(String triggerType) async {
-    final rules = gestureRules.where((r) => r.triggerType == triggerType).toList();
+  void _triggerRulesFor(String triggerTypeOrId) async {
+    final rules = gestureRules.where((r) => r.triggerType == triggerTypeOrId || r.id == triggerTypeOrId).toList();
     if (rules.isEmpty) return;
 
     for (var rule in rules) {
@@ -387,6 +402,129 @@ class RingBleManager extends ChangeNotifier {
         }
       }
     }
+  }
+
+  // Dynamic Time Warping (DTW) algorithm for pattern matching
+  double calculateDtw(List<double> seq1, List<double> seq2) {
+    final n = seq1.length;
+    final m = seq2.length;
+    if (n == 0 || m == 0) return double.infinity;
+
+    final dtw = List.generate(n + 1, (_) => List.filled(m + 1, double.infinity));
+    dtw[0][0] = 0.0;
+
+    for (int i = 1; i <= n; i++) {
+      for (int j = 1; j <= m; j++) {
+        final cost = (seq1[i - 1] - seq2[j - 1]).abs();
+        final minPrev = math.min(
+          dtw[i - 1][j], // Insertion
+          math.min(
+            dtw[i][j - 1], // Deletion
+            dtw[i - 1][j - 1], // Match
+          ),
+        );
+        dtw[i][j] = cost + minPrev;
+      }
+    }
+
+    return dtw[n][m];
+  }
+
+  // Standardization (Z-score normalization) to make pattern matching scale-invariant
+  List<double> standardize(List<double> seq) {
+    if (seq.isEmpty) return seq;
+    double sum = 0.0;
+    for (var x in seq) {
+      sum += x;
+    }
+    double mean = sum / seq.length;
+
+    double varianceSum = 0.0;
+    for (var x in seq) {
+      varianceSum += (x - mean) * (x - mean);
+    }
+    double stdDev = math.sqrt(varianceSum / seq.length);
+    if (stdDev < 0.0001) stdDev = 1.0; // Prevent division by zero
+
+    return seq.map((x) => (x - mean) / stdDev).toList();
+  }
+
+  // Trigger real-time pattern matching for custom recorded gestures
+  void _checkCustomGestures() {
+    final now = DateTime.now();
+    // Cooldown of 2 seconds
+    if (_lastGestureTrigger != null && now.difference(_lastGestureTrigger!) < const Duration(milliseconds: 2000)) {
+      return;
+    }
+
+    final liveNormalized = standardize(_liveMagnitudeWindow);
+
+    for (var rule in gestureRules) {
+      if (rule.triggerType == "custom" && rule.template != null && rule.template!.isNotEmpty) {
+        final templateNormalized = standardize(rule.template!);
+        final dist = calculateDtw(liveNormalized, templateNormalized);
+        
+        // Threshold: less than 18.0 is a solid match (standardized distance sum)
+        if (dist < 18.0) {
+          _lastGestureTrigger = now;
+          _triggerCustomGestureAction(rule, dist);
+          break; // Trigger only one custom gesture at a time
+        }
+      }
+    }
+  }
+
+  void _triggerCustomGestureAction(GestureRule rule, double distance) {
+    addLog("Custom gesture '${rule.name}' matched! (DTW Dist: ${distance.toStringAsFixed(1)})", tag: 'success');
+    
+    gestureTriggeredAlert = true;
+    notifyListeners();
+    Future.delayed(const Duration(milliseconds: 800), () {
+      gestureTriggeredAlert = false;
+      notifyListeners();
+    });
+
+    _triggerRulesFor(rule.id);
+  }
+
+  void executeRule(String ruleId) {
+    _triggerRulesFor(ruleId);
+  }
+
+  // Start recording raw magnitude samples in real-time
+  Future<void> startRecordingGesture() async {
+    if (!isConnected) {
+      addLog("Cannot record gesture: device is not connected", tag: 'error');
+      return;
+    }
+
+    // Ensure raw accelerometer sensor stream is running
+    await startStream();
+
+    isRecordingGesture = true;
+    recordedSamples.clear();
+    recordingCountdown = 3; // Max 3 seconds timeout
+    notifyListeners();
+    addLog("🔴 Recording gesture: Perform the movement now!", tag: 'info');
+
+    _recordingTimer?.cancel();
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      recordingCountdown--;
+      if (recordingCountdown <= 0) {
+        stopRecordingGesture();
+      } else {
+        notifyListeners();
+      }
+    });
+  }
+
+  void stopRecordingGesture() {
+    if (!isRecordingGesture) return;
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    isRecordingGesture = false;
+    notifyListeners();
+    addLog("⏹️ Recording finished. Captured ${recordedSamples.length} samples.", tag: 'success');
   }
 
   Future<bool> _checkConnectedSystemDevices() async {
@@ -1014,6 +1152,25 @@ class RingBleManager extends ChangeNotifier {
     historyY.add(y);
     historyZ.add(z);
     historyMag.add(mag);
+
+    // If recording a custom gesture, collect samples (limit to 75 samples)
+    if (isRecordingGesture) {
+      recordedSamples.add(mag);
+      if (recordedSamples.length >= 75) {
+        stopRecordingGesture();
+      }
+    }
+
+    // Update live sliding window for pattern matching
+    _liveMagnitudeWindow.add(mag);
+    if (_liveMagnitudeWindow.length > 75) {
+      _liveMagnitudeWindow.removeAt(0);
+    }
+
+    // Run custom gesture matching DTW checks
+    if (gestureActionsEnabled && !isRecordingGesture && _liveMagnitudeWindow.length == 75) {
+      _checkCustomGestures();
+    }
   }
 
   void _handleDisconnect({bool autoScanReconnect = true}) async {

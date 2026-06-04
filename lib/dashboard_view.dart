@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -77,9 +78,11 @@ class _DashboardViewState extends State<DashboardView> {
         children: [
           // Tab 1: Scope (listens to high-frequency stream)
           const ScopeTabContent(),
-          // Tab 2: Devices
+          // Tab 2: Gestures
+          const GesturesTabContent(),
+          // Tab 3: Devices
           const DevicesTabContent(),
-          // Tab 3: Logs
+          // Tab 4: Logs
           const LogsTabContent(),
         ],
       ),
@@ -106,6 +109,11 @@ class _DashboardViewState extends State<DashboardView> {
               icon: Icon(Icons.analytics_outlined),
               activeIcon: Icon(Icons.analytics_rounded),
               label: "Scope",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.gesture_rounded),
+              activeIcon: Icon(Icons.gesture_rounded),
+              label: "Gestures",
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.bluetooth_searching_rounded),
@@ -1413,6 +1421,981 @@ class _LogsTabContentState extends State<LogsTabContent> {
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+}
+
+// ==========================================
+// TAB 2: GESTURES TAB (Real-time gesture configurations)
+// ==========================================
+class GesturesTabContent extends StatefulWidget {
+  const GesturesTabContent({super.key});
+
+  @override
+  State<GesturesTabContent> createState() => _GesturesTabContentState();
+}
+
+class _GesturesTabContentState extends State<GesturesTabContent> {
+  @override
+  Widget build(BuildContext context) {
+    final manager = Provider.of<RingBleManager>(context, listen: false);
+
+    return Selector<RingBleManager, (bool, double, List<GestureRule>, bool, bool)>(
+      selector: (_, m) => (
+        m.gestureActionsEnabled,
+        m.gestureThreshold,
+        m.gestureRules,
+        m.gestureTriggeredAlert,
+        m.wakeGestureEnabled,
+      ),
+      builder: (context, data, _) {
+        final gestureActionsEnabled = data.$1;
+        final gestureThreshold = data.$2;
+        final gestureRules = data.$3;
+        final gestureTriggeredAlert = data.$4;
+        final wakeGestureEnabled = data.$5;
+
+        return Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 1. Gesture Triggered Alert Card
+                  if (gestureTriggeredAlert)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF38BA8).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFF38BA8), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFF38BA8).withOpacity(0.2),
+                            blurRadius: 10,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.flash_on_rounded, color: Color(0xFFF38BA8), size: 24),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              "ЖЕСТ ОБНАРУЖЕН! / GESTURE DETECTED!",
+                              style: TextStyle(
+                                color: Color(0xFFF38BA8),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // 2. Main Master Switch Card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF1E1D2F), Color(0xFF13111C)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF2E2A44)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.gesture_rounded, color: Color(0xFF74C7EC)),
+                                SizedBox(width: 8),
+                                Text(
+                                  "Обработка жестов",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Switch(
+                              value: gestureActionsEnabled,
+                              onChanged: (val) {
+                                manager.saveGestureSettings(enabled: val);
+                              },
+                              activeThumbColor: const Color(0xFF74C7EC),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Привяжите встряхивание, двойной тап или ваш собственный записанный жест к отправке GET/POST вебхуков или BLE-команд.",
+                          style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 12, height: 1.4),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0B0A11),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF232035)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                "Всего правил автоматизации:",
+                                style: TextStyle(color: Color(0xFF6C6E85), fontSize: 12),
+                              ),
+                              Text(
+                                "${gestureRules.length}",
+                                style: const TextStyle(
+                                  color: Color(0xFF74C7EC),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 3. Settings Card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF13111C),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF232035)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          "ЧУВСТВИТЕЛЬНОСТЬ И ПРОБУЖДЕНИЕ",
+                          style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              "Порог встряхивания (Shake)",
+                              style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              gestureThreshold.toStringAsFixed(0),
+                              style: const TextStyle(
+                                color: Color(0xFF74C7EC),
+                                fontSize: 13,
+                                fontFamily: 'Fira Code',
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Slider(
+                          value: gestureThreshold,
+                          min: 1200.0,
+                          max: 3500.0,
+                          divisions: 23,
+                          activeColor: const Color(0xFF74C7EC),
+                          inactiveColor: const Color(0xFF232035),
+                          onChanged: (val) {
+                            manager.saveGestureSettings(threshold: val);
+                          },
+                        ),
+                        const Divider(color: Color(0xFF232035), height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Жест пробуждения кольца (Wake)",
+                                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  "Двойной тап запястья включает/выключает режим",
+                                  style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                ),
+                              ],
+                            ),
+                            Switch(
+                              value: wakeGestureEnabled,
+                              onChanged: (val) {
+                                manager.saveGestureSettings(wakeEnabled: val);
+                              },
+                              activeThumbColor: const Color(0xFF89B4FA),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 4. Header for rules list
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "ПРАВИЛА И ДЕЙСТВИЯ",
+                        style: TextStyle(
+                          color: Color(0xFF89B4FA),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _showAddRuleSheet(context, manager),
+                        icon: const Icon(Icons.add_rounded, size: 16),
+                        label: const Text("Добавить"),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFF74C7EC),
+                          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  // 5. Rules List View
+                  if (gestureRules.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF13111C),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFF232035)),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.rule_folder_outlined,
+                            size: 48,
+                            color: const Color(0xFF5D5A75).withOpacity(0.5),
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            "Нет настроенных правил жестов",
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            "Нажмите кнопку 'Добавить' или кнопку '+' ниже, чтобы создать первое правило.",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Color(0xFF6C6E85), fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: gestureRules.length,
+                      itemBuilder: (context, index) {
+                        final rule = gestureRules[index];
+                        return _buildRuleCard(context, manager, rule);
+                      },
+                    ),
+                  const SizedBox(height: 80), // Bottom padding for FAB overlap
+                ],
+              ),
+            ),
+          ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () => _showAddRuleSheet(context, manager),
+            backgroundColor: const Color(0xFF74C7EC),
+            foregroundColor: const Color(0xFF0B0A11),
+            child: const Icon(Icons.add_rounded),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildRuleCard(BuildContext context, RingBleManager manager, GestureRule rule) {
+    IconData triggerIcon = Icons.vibration_rounded;
+    String triggerLabel = "Встряхивание (Shake)";
+    Color triggerColor = const Color(0xFFFAB387);
+    if (rule.triggerType == "wrist_tap") {
+      triggerIcon = Icons.touch_app_rounded;
+      triggerLabel = "Тап запястьем (Wrist Tap)";
+      triggerColor = const Color(0xFFCBA6F7);
+    } else if (rule.triggerType == "custom") {
+      triggerIcon = Icons.gesture_rounded;
+      triggerLabel = "Записанный жест (Custom)";
+      triggerColor = const Color(0xFF89B4FA);
+    }
+
+    String actionLabel = "GET";
+    Color actionBadgeColor = const Color(0xFFA6E3A1);
+    if (rule.actionType == "post") {
+      actionLabel = "POST";
+      actionBadgeColor = const Color(0xFF74C7EC);
+    } else if (rule.actionType == "ble_command") {
+      actionLabel = "BLE";
+      actionBadgeColor = const Color(0xFFF38BA8);
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF13111C),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF232035)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: triggerColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(triggerIcon, color: triggerColor, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      rule.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      triggerLabel,
+                      style: TextStyle(
+                        color: triggerColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: actionBadgeColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: actionBadgeColor.withOpacity(0.3)),
+                ),
+                child: Text(
+                  actionLabel,
+                  style: TextStyle(
+                    color: actionBadgeColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Run Test trigger button
+              IconButton(
+                icon: const Icon(Icons.play_circle_outline_rounded, color: Color(0xFFA6E3A1), size: 22),
+                onPressed: () {
+                  manager.executeRule(rule.id);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: const Color(0xFF152A22),
+                      content: Text(
+                        "Запущено действие: ${rule.name}",
+                        style: const TextStyle(color: Color(0xFFA6E3A1), fontWeight: FontWeight.bold),
+                      ),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                },
+                tooltip: "Тест запуска действия",
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+              ),
+              const SizedBox(width: 8),
+              // Delete Button
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF38BA8), size: 22),
+                onPressed: () {
+                  _showDeleteConfirmDialog(context, manager, rule);
+                },
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0B0A11),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  rule.actionType == "ble_command" ? Icons.settings_bluetooth_rounded : Icons.link_rounded,
+                  color: const Color(0xFF5D5A75),
+                  size: 14,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    rule.payload,
+                    style: const TextStyle(
+                      color: Color(0xFFE0DEF4),
+                      fontFamily: 'Fira Code',
+                      fontSize: 11,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (rule.triggerType == "custom" && rule.template != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              "Шаблон: ${rule.template!.length} точек сигнала акселерометра",
+              style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontStyle: FontStyle.italic),
+            ),
+          ],
+          if (rule.actionType == "post" && rule.postData != null && rule.postData!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F0E17),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF232035)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "POST Body (JSON):",
+                    style: TextStyle(color: Color(0xFF6C6E85), fontSize: 9, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    rule.postData!,
+                    style: const TextStyle(
+                      color: Color(0xFFA6E3A1),
+                      fontFamily: 'Fira Code',
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteConfirmDialog(BuildContext context, RingBleManager manager, GestureRule rule) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF13111C),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            "Удалить '${rule.name}'?",
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          content: const Text(
+            "Вы уверены, что хотите удалить это правило автоматизации жестов?",
+            style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Отмена", style: TextStyle(color: Color(0xFF74C7EC))),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                manager.removeGestureRule(rule.id);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFF38BA8),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text("Удалить"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showAddRuleSheet(BuildContext context, RingBleManager manager) {
+    final formKey = GlobalKey<FormState>();
+    String name = "";
+    String triggerType = "shake";
+    String actionType = "get";
+    String payload = "";
+    String postData = "";
+    List<double> capturedTemplate = [];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0F0F17),
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 42,
+                            height: 5,
+                            margin: const EdgeInsets.only(bottom: 16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2E2A47),
+                              borderRadius: BorderRadius.circular(2.5),
+                            ),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            const Icon(Icons.playlist_add_rounded, color: Color(0xFF74C7EC)),
+                            const SizedBox(width: 8),
+                            const Text(
+                              "Новое правило жеста",
+                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded, color: Color(0xFF9E9BAC)),
+                              onPressed: () {
+                                if (manager.isRecordingGesture) {
+                                  manager.stopRecordingGesture();
+                                }
+                                Navigator.pop(context);
+                              },
+                            ),
+                          ],
+                        ),
+                        const Divider(color: Color(0xFF232035), height: 16),
+                        
+                        // 1. Rule Name Input
+                        const Text(
+                          "НАЗВАНИЕ ПРАВИЛА",
+                          style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: const Color(0xFF0B0A11),
+                            hintText: "Например, Включить свет в зале",
+                            hintStyle: const TextStyle(color: Color(0xFF5D5A75), fontSize: 13),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: const BorderSide(color: Color(0xFF232035)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: const BorderSide(color: Color(0xFF74C7EC)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return "Введите название правила";
+                            }
+                            return null;
+                          },
+                          onSaved: (val) => name = val!.trim(),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // 2. Trigger Type Dropdown
+                        const Text(
+                          "ЖЕСТ (ТРИГГЕР)",
+                          style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        DropdownButtonFormField<String>(
+                          value: triggerType,
+                          dropdownColor: const Color(0xFF0F0F17),
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: const Color(0xFF0B0A11),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: const BorderSide(color: Color(0xFF232035)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: "shake",
+                              child: Text("Встряхивание (Shake)", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
+                            DropdownMenuItem(
+                              value: "wrist_tap",
+                              child: Text("Двойной тап запястья (Wrist Tap)", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
+                            DropdownMenuItem(
+                              value: "custom",
+                              child: Text("Записать свой жест (Custom)", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) {
+                              setModalState(() {
+                                triggerType = val;
+                              });
+                            }
+                          },
+                        ),
+                        
+                        // 2.5 Real-time gesture recorder panel
+                        if (triggerType == "custom") ...[
+                          const SizedBox(height: 16),
+                          const Text(
+                            "ФИЗИЧЕСКАЯ ЗАПИСЬ ДВИЖЕНИЯ",
+                            style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Consumer<RingBleManager>(
+                            builder: (context, liveManager, _) {
+                              final isRecording = liveManager.isRecordingGesture;
+                              final countdown = liveManager.recordingCountdown;
+                              final samplesCount = liveManager.recordedSamples.length;
+
+                              if (isRecording) {
+                                return Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2A1B1C),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFFF38BA8)),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          const SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFF38BA8)),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Text(
+                                            "ЗАПИСЬ ЖЕСТА... ($countdown c)",
+                                            style: const TextStyle(color: Color(0xFFF38BA8), fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      LinearProgressIndicator(
+                                        value: samplesCount / 75.0,
+                                        backgroundColor: const Color(0xFF1E161C),
+                                        color: const Color(0xFFF38BA8),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        "Собрано точек ускорения: $samplesCount из 75",
+                                        style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+
+                              if (samplesCount >= 75) {
+                                capturedTemplate = List<double>.from(liveManager.recordedSamples);
+                              }
+
+                              final hasRecorded = capturedTemplate.isNotEmpty;
+
+                              return Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: hasRecorded ? const Color(0xFF152A22) : const Color(0xFF13111C),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: hasRecorded ? const Color(0xFF225741) : const Color(0xFF232035),
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    if (hasRecorded) ...[
+                                      const Row(
+                                        children: [
+                                          Icon(Icons.check_circle_outline_rounded, color: Color(0xFFA6E3A1), size: 18),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            "Жест успешно записан!",
+                                            style: TextStyle(color: Color(0xFFA6E3A1), fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        "Сохранено точек сигнала: ${capturedTemplate.length} (профиль 1.5 секунды)",
+                                        style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
+                                      ),
+                                      const SizedBox(height: 12),
+                                    ] else ...[
+                                      const Text(
+                                        "Жест еще не записан. Подключите кольцо и совершите движение в момент записи.",
+                                        style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                      ),
+                                      const SizedBox(height: 12),
+                                    ],
+                                    ElevatedButton.icon(
+                                      onPressed: liveManager.isConnected
+                                          ? () => liveManager.startRecordingGesture()
+                                          : null,
+                                      icon: Icon(hasRecorded ? Icons.refresh_rounded : Icons.fiber_manual_record_rounded),
+                                      label: Text(hasRecorded ? "Перезаписать жест" : "Начать запись движения"),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: hasRecorded ? const Color(0xFF232035) : const Color(0xFF2A1C2B),
+                                        foregroundColor: hasRecorded ? Colors.white : const Color(0xFFCBA6F7),
+                                        disabledBackgroundColor: const Color(0xFF181622),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+
+                        // 3. Action Type Dropdown
+                        const Text(
+                          "ДЕЙСТВИЕ",
+                          style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        DropdownButtonFormField<String>(
+                          value: actionType,
+                          dropdownColor: const Color(0xFF0F0F17),
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: const Color(0xFF0B0A11),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: const BorderSide(color: Color(0xFF232035)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: "get",
+                              child: Text("Отправить HTTP GET запрос", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
+                            DropdownMenuItem(
+                              value: "post",
+                              child: Text("Отправить HTTP POST запрос (JSON)", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
+                            DropdownMenuItem(
+                              value: "ble_command",
+                              child: Text("Отправить BLE команду на кольцо", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) {
+                              setModalState(() {
+                                actionType = val;
+                              });
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        // 4. Payload input
+                        Text(
+                          actionType == "ble_command" ? "HEX КОМАНДА КОЛЬЦА" : "URL АДРЕС ВЕБХУКА",
+                          style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'Fira Code'),
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: const Color(0xFF0B0A11),
+                            hintText: actionType == "ble_command"
+                                ? "Например, a104 или a102 (нечетные команды, авторасчет CRC)"
+                                : "Например, https://api.smart-home.ru/v1/devices/toggle",
+                            hintStyle: const TextStyle(color: Color(0xFF5D5A75), fontSize: 12, fontFamily: 'sans-serif'),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: const BorderSide(color: Color(0xFF232035)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: const BorderSide(color: Color(0xFF74C7EC)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return "Поле обязательно для заполнения";
+                            }
+                            if (actionType != "ble_command") {
+                              final urlStr = value.trim().toLowerCase();
+                              if (!urlStr.startsWith("http://") && !urlStr.startsWith("https://")) {
+                                return "Адрес должен начинаться с http:// или https://";
+                              }
+                            }
+                            return null;
+                          },
+                          onSaved: (val) => payload = val!.trim(),
+                        ),
+
+                        // 5. POST body JSON textfield
+                        if (actionType == "post") ...[
+                          const SizedBox(height: 16),
+                          const Text(
+                            "JSON ДАННЫЕ POST-ЗАПРОСА (ОПЦИОНАЛЬНО)",
+                            style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            maxLines: 4,
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'Fira Code'),
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: const Color(0xFF0B0A11),
+                              hintText: '{\n  "state": "toggle",\n  "brightness": 100\n}',
+                              hintStyle: const TextStyle(color: Color(0xFF5D5A75), fontSize: 12, fontFamily: 'sans-serif'),
+                              contentPadding: const EdgeInsets.all(12),
+                              enabledBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(color: Color(0xFF232035)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(color: Color(0xFF74C7EC)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value != null && value.trim().isNotEmpty) {
+                                try {
+                                  jsonDecode(value);
+                                } catch (e) {
+                                  return "Некорректный JSON: $e";
+                                }
+                              }
+                              return null;
+                            },
+                            onSaved: (val) => postData = val ?? "",
+                          ),
+                        ],
+                        const SizedBox(height: 24),
+
+                        // Submit Button
+                        ElevatedButton(
+                          onPressed: () {
+                            if (triggerType == "custom" && capturedTemplate.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  backgroundColor: Color(0xFF3A1C1C),
+                                  content: Text(
+                                    "Вы выбрали пользовательский жест. Сначала запишите движение кольца!",
+                                    style: TextStyle(color: Color(0xFFF38BA8), fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+
+                            if (formKey.currentState!.validate()) {
+                              formKey.currentState!.save();
+                              final newRule = GestureRule(
+                                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                                name: name,
+                                triggerType: triggerType,
+                                actionType: actionType,
+                                payload: payload,
+                                postData: postData.isNotEmpty ? postData : null,
+                                template: triggerType == "custom" ? capturedTemplate : null,
+                              );
+                              manager.addGestureRule(newRule);
+                              Navigator.pop(context);
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF74C7EC),
+                            foregroundColor: const Color(0xFF0B0A11),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: const Text(
+                            "Создать правило жеста",
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
