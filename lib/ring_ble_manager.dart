@@ -587,12 +587,13 @@ class RingBleManager extends ChangeNotifier {
         for (var char in notifyChars) {
           try {
             await char.setNotifyValue(true);
-            final sub = char.onValueReceived.listen((data) {
+            final sub = char.lastValueStream.listen((data) {
               _parseNotificationData(data);
             });
             _notifySubs.add(sub);
+            addLog("Subscribed to ${char.uuid.toString().substring(0, 8)}: isNotifying=${char.isNotifying}", tag: char.isNotifying ? 'success' : 'warn');
           } catch (e) {
-            addLog("Failed to subscribe to ${char.uuid}: $e", tag: 'warn');
+            addLog("Failed to subscribe to ${char.uuid.toString().substring(0, 8)}: $e", tag: 'warn');
           }
         }
 
@@ -713,10 +714,16 @@ class RingBleManager extends ChangeNotifier {
 
   Future<void> writeCommand(String hexString) async {
     final char = writeChar;
-    if (char == null || !isConnected) return;
+    if (char == null || !isConnected) {
+      addLog("Cannot write command: no write characteristic mapped", tag: 'error');
+      return;
+    }
     try {
       final bytes = createCommand(hexString);
-      await char.write(bytes, withoutResponse: true);
+      final withoutResp = char.properties.writeWithoutResponse;
+      addLog("Writing: $hexString to ${char.uuid.toString().substring(0, 8)} (noResp=$withoutResp)...", tag: 'info');
+      await char.write(bytes, withoutResponse: withoutResp);
+      addLog("Write successful: $hexString", tag: 'success');
     } catch (e) {
       addLog("Transmission error: $e", tag: 'error');
     }
@@ -778,7 +785,7 @@ class RingBleManager extends ChangeNotifier {
 
         final char = writeChar;
         if (char != null) {
-          await char.write(onCmd, withoutResponse: true);
+          await char.write(onCmd, withoutResponse: char.properties.writeWithoutResponse);
         }
         if (symbol == '.') {
           await Future.delayed(dotDuration);
@@ -787,7 +794,7 @@ class RingBleManager extends ChangeNotifier {
         }
 
         if (char != null) {
-          await char.write(offCmd, withoutResponse: true);
+          await char.write(offCmd, withoutResponse: char.properties.writeWithoutResponse);
         }
         await Future.delayed(symbolGap);
       }
