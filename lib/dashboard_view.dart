@@ -1477,10 +1477,10 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
       ),
       builder: (context, data, _) {
         final gestureActionsEnabled = data.$1;
-        final gestureThreshold = data.;
-        final customGestureThreshold = data.;
-        // rulesVersion (data.) is used by Selector to trigger rebuilds
-        final wakeGestureEnabled = data.;
+        final gestureThreshold = data.$2;
+        final customGestureThreshold = data.$3;
+        // rulesVersion (data.$4) is used by Selector to trigger rebuilds
+        final wakeGestureEnabled = data.$5;
         final gestureRules = manager.gestureRules;
 
         return Scaffold(
