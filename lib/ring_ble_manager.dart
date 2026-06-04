@@ -464,8 +464,8 @@ class RingBleManager extends ChangeNotifier {
         final templateNormalized = standardize(rule.template!);
         final dist = calculateDtw(liveNormalized, templateNormalized);
         
-        // Threshold: less than 18.0 is a solid match (standardized distance sum)
-        if (dist < 18.0) {
+        // Threshold: less than 26.0 is a match (standardized distance sum, relaxed for imprecise gestures)
+        if (dist < 26.0) {
           _lastGestureTrigger = now;
           _triggerCustomGestureAction(rule, dist);
           break; // Trigger only one custom gesture at a time

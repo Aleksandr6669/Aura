@@ -108,22 +108,22 @@ class _DashboardViewState extends State<DashboardView> {
             BottomNavigationBarItem(
               icon: Icon(Icons.analytics_outlined),
               activeIcon: Icon(Icons.analytics_rounded),
-              label: "Scope",
+              label: "График",
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.gesture_rounded),
               activeIcon: Icon(Icons.gesture_rounded),
-              label: "Gestures",
+              label: "Жесты",
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.bluetooth_searching_rounded),
               activeIcon: Icon(Icons.bluetooth_connected_rounded),
-              label: "Devices",
+              label: "Устройства",
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.terminal_outlined),
               activeIcon: Icon(Icons.terminal_rounded),
-              label: "Logs",
+              label: "Логи",
             ),
           ],
         ),
@@ -168,7 +168,7 @@ class ScopeTabContent extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    manager.isConnected ? "CONNECTED" : "DISCONNECTED",
+                    manager.isConnected ? "ПОДКЛЮЧЕНО" : "ОТКЛЮЧЕНО",
                     style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                   const Spacer(),
@@ -224,10 +224,10 @@ class ScopeTabContent extends StatelessWidget {
               mainAxisSpacing: 12,
               childAspectRatio: 1.5,
               children: [
-                _buildValueCard("X-Axis (Roll)", manager.lastX, const Color(0xFFF38BA8)),
-                _buildValueCard("Y-Axis (Pitch)", manager.lastY, const Color(0xFFA6E3A1)),
-                _buildValueCard("Z-Axis (Yaw)", manager.lastZ, const Color(0xFF89B4FA)),
-                _buildValueCard("Magnitude", manager.lastMag, const Color(0xFFFAB387)),
+                _buildValueCard("Ось X (Roll)", manager.lastX, const Color(0xFFF38BA8)),
+                _buildValueCard("Ось Y (Pitch)", manager.lastY, const Color(0xFFA6E3A1)),
+                _buildValueCard("Ось Z (Yaw)", manager.lastZ, const Color(0xFF89B4FA)),
+                _buildValueCard("Амплитуда", manager.lastMag, const Color(0xFFFAB387)),
               ],
             ),
             const SizedBox(height: 16),
@@ -239,7 +239,7 @@ class ScopeTabContent extends StatelessWidget {
                   child: ElevatedButton.icon(
                     onPressed: () => manager.clearScope(),
                     icon: const Icon(Icons.clear_all_rounded, size: 16),
-                    label: const Text("Clear"),
+                    label: const Text("Очистить"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF201D30),
                       foregroundColor: Colors.white,
@@ -253,7 +253,7 @@ class ScopeTabContent extends StatelessWidget {
                   child: ElevatedButton.icon(
                     onPressed: manager.isConnected ? () => manager.startStream() : null,
                     icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                    label: const Text("Start"),
+                    label: const Text("Старт"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1C3A27),
                       foregroundColor: const Color(0xFFA6E3A1),
@@ -268,7 +268,7 @@ class ScopeTabContent extends StatelessWidget {
                   child: ElevatedButton.icon(
                     onPressed: manager.isConnected ? () => manager.stopStream() : null,
                     icon: const Icon(Icons.stop_rounded, size: 16),
-                    label: const Text("Stop"),
+                    label: const Text("Стоп"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF3A1C1C),
                       foregroundColor: const Color(0xFFF38BA8),
@@ -293,7 +293,7 @@ class ScopeTabContent extends StatelessWidget {
                         activeColor: const Color(0xFF74C7EC),
                       ),
                       const Text(
-                        "Filter",
+                        "Фильтр",
                         style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 13, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(width: 12),
@@ -880,7 +880,7 @@ class DevicesTabContent extends StatelessWidget {
               Row(
                 children: [
                   const Text(
-                    "BLE SCANNER",
+                    "BLE СКАНЕР",
                     style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                   const Spacer(),
@@ -897,7 +897,7 @@ class DevicesTabContent extends StatelessWidget {
               ElevatedButton.icon(
                 onPressed: isScanning ? manager.stopManualScan : manager.startManualScan,
                 icon: Icon(isScanning ? Icons.stop_rounded : Icons.search_rounded),
-                label: Text(isScanning ? "Stop Scanning" : "Scan for Devices"),
+                label: Text(isScanning ? "Остановить поиск" : "Поиск устройств"),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: isScanning ? const Color(0xFFF38BA8) : const Color(0xFF74C7EC),
                   foregroundColor: const Color(0xFF0B0A11),
@@ -926,7 +926,7 @@ class DevicesTabContent extends StatelessWidget {
                     ),
                     const Expanded(
                       child: Text(
-                        "Show unnamed BLE devices",
+                        "Показывать безымянные BLE устройства",
                         style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 12, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -938,14 +938,14 @@ class DevicesTabContent extends StatelessWidget {
               // 1. Render Connected Device Card at the top
               if (connectedDevice != null) ...[
                 const Text(
-                  "MY DEVICE (CONNECTED / CONNECTING)",
+                  "МОЕ УСТРОЙСТВО (ПОДКЛЮЧЕНО / ПОДКЛЮЧЕНИЕ)",
                   style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 _buildConnectedDeviceCard(context, manager, connectedDevice),
                 const SizedBox(height: 16),
                 const Text(
-                  "AVAILABLE DEVICES",
+                  "ДОСТУПНЫЕ УСТРОЙСТВА",
                   style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
@@ -961,7 +961,7 @@ class DevicesTabContent extends StatelessWidget {
                             Icon(Icons.bluetooth_disabled_rounded, size: 48, color: const Color(0xFF5D5A75).withValues(alpha: 0.5)),
                             const SizedBox(height: 12),
                             const Text(
-                              "No matching BLE devices scanned yet.\nClick Scan to discover surrounding devices.",
+                              "Устройства еще не найдены.\nНажмите Поиск устройств для сканирования эфира.",
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Color(0xFF5D5A75), fontSize: 13),
                             ),
@@ -1051,7 +1051,7 @@ class DevicesTabContent extends StatelessWidget {
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                         ),
                                         child: const Text(
-                                          "Connect",
+                                          "Подключить",
                                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                         ),
                                       ),
@@ -1072,7 +1072,7 @@ class DevicesTabContent extends StatelessWidget {
   }
 
   Widget _buildConnectedDeviceCard(BuildContext context, RingBleManager manager, BluetoothDevice device) {
-    final name = device.platformName.isEmpty ? "[Saved Device / Smart Ring]" : device.platformName;
+    final name = device.platformName.isEmpty ? "[Сохраненное кольцо]" : device.platformName;
     final id = device.remoteId.str;
     final isConnecting = manager.connectionStatus == "Connecting...";
 
@@ -1113,7 +1113,7 @@ class DevicesTabContent extends StatelessWidget {
                   if (isConnecting) ...[
                     const SizedBox(height: 4),
                     const Text(
-                      "Connecting...",
+                      "Подключение...",
                       style: TextStyle(color: Color(0xFFF9E2AF), fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ] else if (manager.isConnected) ...[
@@ -1123,7 +1123,7 @@ class DevicesTabContent extends StatelessWidget {
                         Icon(Icons.info_outline_rounded, size: 10, color: Color(0xFFA6E3A1)),
                         SizedBox(width: 4),
                         Text(
-                          "Tap to view services & channels",
+                          "Нажмите для просмотра сервисов и характеристик",
                           style: TextStyle(color: Color(0xFFA6E3A1), fontSize: 10, fontWeight: FontWeight.w600),
                         ),
                       ],
@@ -1141,7 +1141,7 @@ class DevicesTabContent extends StatelessWidget {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               child: const Text(
-                "Disconnect",
+                "Отключить",
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
               ),
             ),
@@ -1188,7 +1188,7 @@ class DevicesTabContent extends StatelessWidget {
                       const Icon(Icons.cable_rounded, color: Color(0xFF74C7EC)),
                       const SizedBox(width: 8),
                       const Text(
-                        "GATT Services & Channels",
+                        "GATT Сервисы и Характеристики",
                         style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       const Spacer(),
@@ -1202,7 +1202,7 @@ class DevicesTabContent extends StatelessWidget {
                   
                   // 1. Mapped Channels
                   const Text(
-                    "ACTIVE MAPPED CHANNELS",
+                    "АКТИВНЫЕ НАЗНАЧЕННЫЕ КАНАЛЫ",
                     style: TextStyle(color: Color(0xFF89B4FA), fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
@@ -1217,22 +1217,22 @@ class DevicesTabContent extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          "Write Channel (Command Transmission):",
+                          "Канал записи (отправка команд):",
                           style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          manager.writeChar?.uuid.toString().toLowerCase() ?? "Not mapped",
+                          manager.writeChar?.uuid.toString().toLowerCase() ?? "Не назначен",
                           style: const TextStyle(color: Color(0xFFA6E3A1), fontSize: 11, fontFamily: 'monospace'),
                         ),
                         const Divider(color: Color(0xFF232035), height: 16),
                         const Text(
-                          "Notify Channel (Subscribed Sensors):",
+                          "Канал уведомлений (получение данных):",
                           style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          manager.notifyChar?.uuid.toString().toLowerCase() ?? "Not mapped",
+                          manager.notifyChar?.uuid.toString().toLowerCase() ?? "Не назначен",
                           style: const TextStyle(color: Color(0xFFFAB387), fontSize: 11, fontFamily: 'monospace'),
                         ),
                       ],
@@ -1242,7 +1242,7 @@ class DevicesTabContent extends StatelessWidget {
 
                   // 2. Discovered GATT Services
                   Text(
-                    "DISCOVERED SERVICES (${manager.discoveredServicesList.length})",
+                    "ОБНАРУЖЕННЫЕ СЕРВИСЫ (${manager.discoveredServicesList.length})",
                     style: const TextStyle(color: Color(0xFFCBA6F7), fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
@@ -1368,7 +1368,7 @@ class _LogsTabContentState extends State<LogsTabContent> {
               Row(
                 children: [
                   const Text(
-                    "SYSTEM CONSOLE LOGS",
+                    "СИСТЕМНЫЕ ЛОГИ КОНСОЛИ",
                     style: TextStyle(color: Color(0xFF74C7EC), fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                   const Spacer(),
@@ -1379,7 +1379,7 @@ class _LogsTabContentState extends State<LogsTabContent> {
                       });
                     },
                     icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF38BA8), size: 20),
-                    tooltip: "Clear Logs",
+                    tooltip: "Очистить логи",
                   ),
                 ],
               ),
@@ -1489,7 +1489,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                           const SizedBox(width: 12),
                           const Expanded(
                             child: Text(
-                              "ЖЕСТ ОБНАРУЖЕН! / GESTURE DETECTED!",
+                              "⚡ ЖЕСТ РАСПОЗНАН! ⚡",
                               style: TextStyle(
                                 color: Color(0xFFF38BA8),
                                 fontWeight: FontWeight.bold,
