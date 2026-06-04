@@ -94,10 +94,10 @@ class RingBleManager extends ChangeNotifier {
 
   // History buffers for high-speed custom painter
   static const int maxPoints = 200;
-  final List<double> historyX = List.filled(maxPoints, 0.0);
-  final List<double> historyY = List.filled(maxPoints, 0.0);
-  final List<double> historyZ = List.filled(maxPoints, 0.0);
-  final List<double> historyMag = List.filled(maxPoints, 0.0);
+  final List<double> historyX = List.filled(maxPoints, 0.0, growable: true);
+  final List<double> historyY = List.filled(maxPoints, 0.0, growable: true);
+  final List<double> historyZ = List.filled(maxPoints, 0.0, growable: true);
+  final List<double> historyMag = List.filled(maxPoints, 0.0, growable: true);
 
   // App running indicator
   bool isDisposed = false;
