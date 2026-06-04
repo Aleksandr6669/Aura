@@ -587,28 +587,23 @@ class RingBleManager extends ChangeNotifier {
   void _handleRecordingSample(double mag) {
     // ─── WAITING PHASE ───────────────────────────────────────────────────────
     if (isWaitingForGesture) {
-      _baselineWindow.add(mag);
-
-      // First N packets: build resting baseline (live calibration)
-      if (_baselineWindow.length <= _calibrationPackets) {
-        if (_baselineWindow.length == _calibrationPackets) {
-          // Baseline ready — compute threshold = baseline × 1.35 (min +300)
-          _recordingBaseline = _baselineWindow.reduce((a, b) => a + b) / _baselineWindow.length;
-          _recordingActivityThreshold = _recordingBaseline + math.max(300.0, _recordingBaseline * 0.35);
-          addLog("⏳ Готов! покой=${_recordingBaseline.toStringAsFixed(0)}, порог=${_recordingActivityThreshold.toStringAsFixed(0)}", tag: 'info');
-        }
-        return; // still calibrating
+      if (_baselineWindow.isEmpty) {
+        _recordingBaseline = mag;
+        _baselineWindow.add(mag);
+        addLog("⏳ Готов! Базовая амплитуда: ${_recordingBaseline.toStringAsFixed(0)}", tag: 'info');
+        return;
       }
 
-      // After calibration: simple absolute threshold check
-      if (mag > _recordingActivityThreshold) {
+      final deviation = (mag - _recordingBaseline).abs();
+      // Deviation of 250 units is a reliable indicator of movement starting
+      if (deviation > 250.0) {
         isWaitingForGesture = false;
         isRecordingGesture = true;
         recordedSamples.clear();
         _recordingTimer?.cancel();
         recordingCountdown = _maxRecordingMs ~/ 1000;
         _recordingTimer = Timer(const Duration(milliseconds: _maxRecordingMs), stopRecordingGesture);
-        addLog("🔴 Движение! mag=${mag.toStringAsFixed(0)} > ${_recordingActivityThreshold.toStringAsFixed(0)} — Запись...", tag: 'info');
+        addLog("🔴 Движение! Отклонение: ${deviation.toStringAsFixed(0)} — Запись...", tag: 'info');
         notifyListeners();
       }
       return;
@@ -617,8 +612,11 @@ class RingBleManager extends ChangeNotifier {
     // ─── RECORDING PHASE ────────────────────────────────────────────────────
     if (isRecordingGesture) {
       recordedSamples.add(mag);
-      // Reset silence timer on every active sample, start it on quiet
-      if (mag > _recordingActivityThreshold) {
+      final deviation = (mag - _recordingBaseline).abs();
+      final isMoving = deviation > 200.0;
+      
+      // Reset silence timer on active movement, trigger stop when quiet
+      if (isMoving) {
         _silenceTimer?.cancel();
         _silenceTimer = Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
       } else {
@@ -915,12 +913,22 @@ class RingBleManager extends ChangeNotifier {
     }
 
     _connSub?.cancel();
-    _connSub = device.connectionState.listen((state) {
+    _connSub = device.connectionState.listen((state) async {
       if (state == BluetoothConnectionState.connected) {
         isConnected = true;
         connectionStatus = "Connected";
         notifyListeners();
         addLog("Connected successfully to smart ring.", tag: 'success');
+        
+        if (Platform.isAndroid) {
+          try {
+            await device.requestConnectionPriority(connectionPriorityRequest: ConnectionPriority.high);
+            addLog("Requested high connection priority on Android", tag: 'success');
+          } catch (e) {
+            addLog("Could not set priority: $e", tag: 'warn');
+          }
+        }
+        
         _discoverServices(device);
       } else if (state == BluetoothConnectionState.disconnected) {
         // Only handle unexpected disconnects here if we were previously connected.
@@ -1167,19 +1175,20 @@ class RingBleManager extends ChangeNotifier {
   }
 
   Future<void> writeCommand(String hexString) async {
-    final char = writeChar;
-    if (char == null || !isConnected) {
+    if (writeChars.isEmpty || !isConnected) {
       addLog("Cannot write command: no write characteristic mapped", tag: 'error');
       return;
     }
-    try {
-      final bytes = createCommand(hexString);
-      final withoutResp = char.properties.writeWithoutResponse;
-      addLog("Writing: $hexString to ${char.uuid.toString().substring(0, 8)} (noResp=$withoutResp)...", tag: 'info');
-      await char.write(bytes, withoutResponse: withoutResp);
-      addLog("Write successful: $hexString", tag: 'success');
-    } catch (e) {
-      addLog("Transmission error: $e", tag: 'error');
+    final bytes = createCommand(hexString);
+    for (var char in writeChars) {
+      try {
+        final withoutResp = char.properties.writeWithoutResponse;
+        addLog("Writing: $hexString to ${char.uuid.toString().substring(0, 8)} (noResp=$withoutResp)...", tag: 'info');
+        await char.write(bytes, withoutResponse: withoutResp);
+        addLog("Write successful to ${char.uuid.toString().substring(0, 8)}: $hexString", tag: 'success');
+      } catch (e) {
+        addLog("Transmission error on ${char.uuid.toString().substring(0, 8)}: $e", tag: 'warn');
+      }
     }
   }
 
@@ -1273,6 +1282,8 @@ class RingBleManager extends ChangeNotifier {
     if (!isConnected) return;
     _startPlaybackTimer();
     addLog("🟢 Запуск стрима акселерометра...", tag: 'info');
+    await writeCommand("0a0200");
+    await Future.delayed(const Duration(milliseconds: 300));
     await writeCommand("a104");
   }
 
