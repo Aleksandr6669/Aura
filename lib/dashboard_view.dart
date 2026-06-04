@@ -13,13 +13,14 @@ class DashboardView extends StatefulWidget {
   State<DashboardView> createState() => _DashboardViewState();
 }
 
-class _DashboardViewState extends State<DashboardView> {
+class _DashboardViewState extends State<DashboardView> with WidgetsBindingObserver {
   int _selectedTab = 0;
   StreamSubscription<GestureRule>? _gestureSubscription;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final manager = Provider.of<RingBleManager>(context, listen: false);
       _gestureSubscription = manager.onGestureTriggered.listen((rule) {
@@ -41,8 +42,20 @@ class _DashboardViewState extends State<DashboardView> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _gestureSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      final manager = Provider.of<RingBleManager>(context, listen: false);
+      if (manager.isStreaming) {
+        manager.addLog("📱 Приложение закрыто — останавливаем стрим для экономии батареи кольца", tag: 'info');
+        manager.stopStream();
+      }
+    }
   }
 
   @override
