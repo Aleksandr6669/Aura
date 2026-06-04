@@ -1878,6 +1878,17 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                 padding: EdgeInsets.zero,
               ),
               const SizedBox(width: 8),
+              // Edit Button
+              IconButton(
+                icon: const Icon(Icons.edit_rounded, color: Color(0xFF74C7EC), size: 22),
+                onPressed: () {
+                  _showAddRuleSheet(context, manager, ruleToEdit: rule);
+                },
+                tooltip: "Редактировать правило",
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+              ),
+              const SizedBox(width: 8),
               // Delete Button
               IconButton(
                 icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF38BA8), size: 22),
@@ -1998,14 +2009,14 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
     );
   }
 
-  void _showAddRuleSheet(BuildContext context, RingBleManager manager) {
+  void _showAddRuleSheet(BuildContext context, RingBleManager manager, {GestureRule? ruleToEdit}) {
     final formKey = GlobalKey<FormState>();
-    String name = "";
-    String triggerType = "shake";
-    String actionType = "get";
-    String payload = "";
-    String postData = "";
-    List<double> capturedTemplate = [];
+    String name = ruleToEdit?.name ?? "";
+    String triggerType = ruleToEdit?.triggerType ?? "shake";
+    String actionType = ruleToEdit?.actionType ?? "get";
+    String payload = ruleToEdit?.payload ?? "";
+    String postData = ruleToEdit?.postData ?? "";
+    List<double> capturedTemplate = ruleToEdit?.template != null ? List<double>.from(ruleToEdit!.template!) : [];
 
     manager.clearRecordedSamples();
 
@@ -2046,11 +2057,14 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                       ),
                       Row(
                         children: [
-                          const Icon(Icons.playlist_add_rounded, color: Color(0xFF74C7EC)),
+                          Icon(
+                            ruleToEdit != null ? Icons.edit_note_rounded : Icons.playlist_add_rounded,
+                            color: const Color(0xFF74C7EC),
+                          ),
                           const SizedBox(width: 8),
-                          const Text(
-                            "Новое правило жеста",
-                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                          Text(
+                            ruleToEdit != null ? "Редактирование правила" : "Новое правило жеста",
+                            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                           const Spacer(),
                           IconButton(
@@ -2078,6 +2092,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                         ),
                         const SizedBox(height: 6),
                         TextFormField(
+                          initialValue: name,
                           style: const TextStyle(color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
                             filled: true,
@@ -2111,7 +2126,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                         ),
                         const SizedBox(height: 6),
                         DropdownButtonFormField<String>(
-                          value: triggerType,
+                          initialValue: triggerType,
                           dropdownColor: const Color(0xFF0F0F17),
                           decoration: InputDecoration(
                             filled: true,
@@ -2163,13 +2178,14 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
 
                               // Sync capturedTemplate when recording finishes
                               if (liveManager.recordingDone &&
-                                  capturedTemplate.isEmpty &&
                                   liveManager.recordedSamples.isNotEmpty) {
-                                WidgetsBinding.instance.addPostFrameCallback((_) {
-                                  setModalState(() {
-                                    capturedTemplate = List<double>.from(liveManager.recordedSamples);
+                                if (liveManager.recordedSamples.length != capturedTemplate.length) {
+                                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                                    setModalState(() {
+                                      capturedTemplate = List<double>.from(liveManager.recordedSamples);
+                                    });
                                   });
-                                });
+                                }
                               }
 
                               // ─── Phase: ОЖИДАНИЕ — ждём движения ───
@@ -2214,9 +2230,9 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                 return Container(
                                   padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF2A1B1C),
+                                    color: const Color(0xFF2A1C2B),
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: const Color(0xFFF38BA8)),
+                                    border: Border.all(color: const Color(0xFFCBA6F7)),
                                   ),
                                   child: Column(
                                     children: [
@@ -2226,25 +2242,36 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                           const SizedBox(
                                             width: 14,
                                             height: 14,
-                                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFF38BA8)),
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFCBA6F7)),
                                           ),
                                           const SizedBox(width: 10),
-                                          const Text(
-                                            "ЗАПИСЬ ДВИЖЕНИЯ...",
-                                            style: TextStyle(color: Color(0xFFF38BA8), fontWeight: FontWeight.bold, fontSize: 13),
+                                          Text(
+                                            "ЗАПИСЬ ДВИЖЕНИЯ... ($countdown с)",
+                                            style: const TextStyle(color: Color(0xFFCBA6F7), fontWeight: FontWeight.bold, fontSize: 13),
                                           ),
                                         ],
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
                                         "Собрано: $samplesCount точек (~${(samplesCount / 50.0).toStringAsFixed(1)} с)",
-                                        style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      const Text(
-                                        "Остановите движение — запись завершится автоматически",
+                                        style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
                                         textAlign: TextAlign.center,
-                                        style: TextStyle(color: Color(0xFF5D5A75), fontSize: 10),
+                                      ),
+                                      Container(
+                                        height: 100,
+                                        margin: const EdgeInsets.symmetric(vertical: 12),
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF0C0D12),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: const Color(0xFF232035)),
+                                        ),
+                                        child: ScopeChart(
+                                          historyX: liveManager.historyX,
+                                          historyY: liveManager.historyY,
+                                          historyZ: liveManager.historyZ,
+                                          historyMag: liveManager.historyMag,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -2300,7 +2327,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                         const SizedBox(height: 8),
                                       ],
                                       const Text(
-                                        "Нажмите кнопку и сделайте жест. Запись начнется сразу и завершится через 5 секунд или при нажатии кнопки 'Завершить'.",
+                                        "Нажмите кнопку и сделайте жест. Запись начнется сразу и завершится через 20 секунд или при нажатии кнопки 'Остановить'.",
                                         style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
                                       ),
                                       const SizedBox(height: 12),
@@ -2326,11 +2353,11 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                           ? Icons.stop_rounded
                                           : (hasRecorded ? Icons.refresh_rounded : Icons.fiber_manual_record_rounded)),
                                       label: Text(liveManager.isRecordingGesture
-                                          ? "Завершить запись"
-                                          : (hasRecorded ? "Перезаписать жест" : "Начать запись (5 сек)")),
+                                          ? "Остановить запись"
+                                          : (hasRecorded ? "Перезаписать жест" : "Начать запись (20 сек)")),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: liveManager.isRecordingGesture
-                                            ? const Color(0xFF3A1C1C)
+                                            ? const Color(0xFF4C1D24)
                                             : (hasRecorded ? const Color(0xFF232035) : const Color(0xFF2A1C2B)),
                                         foregroundColor: liveManager.isRecordingGesture
                                             ? const Color(0xFFF38BA8)
@@ -2354,7 +2381,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                         ),
                         const SizedBox(height: 6),
                         DropdownButtonFormField<String>(
-                          value: actionType,
+                          initialValue: actionType,
                           dropdownColor: const Color(0xFF0F0F17),
                           decoration: InputDecoration(
                             filled: true,
@@ -2396,6 +2423,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                         ),
                         const SizedBox(height: 6),
                         TextFormField(
+                          initialValue: payload,
                           style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'Fira Code'),
                           decoration: InputDecoration(
                             filled: true,
@@ -2438,6 +2466,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                           ),
                           const SizedBox(height: 6),
                           TextFormField(
+                            initialValue: postData,
                             maxLines: 4,
                             style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'Fira Code'),
                             decoration: InputDecoration(
@@ -2493,7 +2522,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                           if (formKey.currentState!.validate()) {
                             formKey.currentState!.save();
                             final newRule = GestureRule(
-                              id: DateTime.now().millisecondsSinceEpoch.toString(),
+                              id: ruleToEdit?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
                               name: name,
                               triggerType: triggerType,
                               actionType: actionType,
@@ -2501,7 +2530,11 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                               postData: postData.isNotEmpty ? postData : null,
                               template: triggerType == "custom" ? capturedTemplate : null,
                             );
-                            manager.addGestureRule(newRule);
+                            if (ruleToEdit != null) {
+                              manager.updateGestureRule(newRule);
+                            } else {
+                              manager.addGestureRule(newRule);
+                            }
                             Navigator.pop(context);
                           }
                         },
@@ -2511,9 +2544,9 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        child: const Text(
-                          "Создать правило жеста",
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        child: Text(
+                          ruleToEdit != null ? "Сохранить изменения" : "Создать правило жеста",
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                         ),
                       ),
                     ],

@@ -177,8 +177,6 @@ class RingBleManager extends ChangeNotifier {
   bool wakeGestureActive = false;
 
   // Sliding window buffer for real-time custom gestures
-  final List<double> _liveMagnitudeWindow = [];
-
   // Packet rate measurement
   int _packetCount = 0;
   DateTime? _lastRateCheck;
@@ -192,16 +190,16 @@ class RingBleManager extends ChangeNotifier {
   Timer? _recordingTimer;                 // max-duration safety timeout
   Timer? _silenceTimer;                   // fires when motion stops
   int recordingCountdown = 0;             // UI countdown (seconds remaining)
-  double _recordingActivityThreshold = 800.0; // mag above baseline = motion detected
-  double _recordingBaseline = 0.0;        // resting magnitude reference
-  static const int _silenceMs = 800;      // ms of quiet after which recording stops
-  static const int _maxRecordingMs = 10000; // max 10 seconds
 
   // Live calibration buffer (first N packets during wait = resting baseline)
   final List<double> _baselineWindow = [];
-  static const int _baselineWindowSize = 20;
-  static const int _calibrationPackets = 3; // only 3 packets needed at any rate
   bool isCalibrating = false; // kept for UI compat
+
+  // Active motion gesture recognition fields
+  final List<double> _activeMotionBuffer = [];
+  bool _isMovingActive = false;
+  int _quietSampleCount = 0;
+  double _runningBaseline = 1000.0;
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<bool>? _scanningStateSub;
@@ -299,6 +297,17 @@ class RingBleManager extends ChangeNotifier {
     saveGestureRules();
     notifyListeners();
     addLog("Added gesture rule: ${rule.name}", tag: 'success');
+  }
+
+  void updateGestureRule(GestureRule rule) {
+    final idx = gestureRules.indexWhere((r) => r.id == rule.id);
+    if (idx != -1) {
+      gestureRules[idx] = rule;
+      rulesVersion++;
+      saveGestureRules();
+      notifyListeners();
+      addLog("Updated gesture rule: ${rule.name}", tag: 'success');
+    }
   }
 
   void removeGestureRule(String id) {
@@ -488,34 +497,39 @@ class RingBleManager extends ChangeNotifier {
     return seq.map((x) => (x - mean) / stdDev).toList();
   }
 
-  // Trigger real-time pattern matching for custom recorded gestures
-  void _checkCustomGestures() {
+  // Process the collected gesture once movement stops
+  void _processFinishedGesture() {
     final now = DateTime.now();
     // Cooldown of 2 seconds between triggers
     if (_lastGestureTrigger != null && now.difference(_lastGestureTrigger!) < const Duration(milliseconds: 2000)) {
+      _activeMotionBuffer.clear();
       return;
     }
+
+    final gestureData = _activeMotionBuffer.sublist(
+      0,
+      math.max(0, _activeMotionBuffer.length - _quietSampleCount),
+    );
+    _activeMotionBuffer.clear();
+
+    if (gestureData.length < 8) {
+      // Too short to be a gesture
+      return;
+    }
+
+    addLog("⚡ Движение завершено. Длина: ${gestureData.length} точек. Распознавание...", tag: 'info');
 
     GestureRule? bestRule;
     double bestNormalizedDist = double.infinity;
 
     for (var rule in gestureRules) {
-      if (rule.triggerType != "custom" || rule.template == null || rule.template!.length < 2) continue;
+      if (rule.triggerType != "custom" || rule.template == null || rule.template!.length < 5) continue;
 
-      final templateLen = rule.template!.length;
-
-      // We need at least templateLen points in the live buffer
-      if (_liveMagnitudeWindow.length < templateLen) continue;
-
-      // Extract the last templateLen points from the live buffer
-      final liveSegment = _liveMagnitudeWindow.sublist(_liveMagnitudeWindow.length - templateLen);
-
-      final liveNormalized = standardize(liveSegment);
+      final liveNormalized = standardize(gestureData);
       final templateNormalized = standardize(rule.template!);
 
       final rawDist = calculateDtw(liveNormalized, templateNormalized);
-      // Normalize by path length so threshold is comparable across gesture sizes
-      final normalizedDist = rawDist / templateLen;
+      final normalizedDist = rawDist / rule.template!.length;
 
       if (normalizedDist < bestNormalizedDist) {
         bestNormalizedDist = normalizedDist;
@@ -524,9 +538,16 @@ class RingBleManager extends ChangeNotifier {
     }
 
     // Threshold: normalized DTW per-point distance less than user settings is a match
-    if (bestRule != null && bestNormalizedDist < customGestureThreshold) {
-      _lastGestureTrigger = now;
-      _triggerCustomGestureAction(bestRule, bestNormalizedDist);
+    if (bestRule != null) {
+      addLog("🔍 Наилучшее совпадение: '${bestRule.name}' с DTW: ${bestNormalizedDist.toStringAsFixed(3)}", tag: 'info');
+      if (bestNormalizedDist < customGestureThreshold) {
+        _lastGestureTrigger = now;
+        _triggerCustomGestureAction(bestRule, bestNormalizedDist);
+      } else {
+        addLog("❌ Жест не распознан (DTW ${bestNormalizedDist.toStringAsFixed(3)} > порога $customGestureThreshold)", tag: 'warn');
+      }
+    } else {
+      addLog("❌ Нет подходящих шаблонов жестов", tag: 'warn');
     }
   }
 
@@ -560,7 +581,7 @@ class RingBleManager extends ChangeNotifier {
     isCalibrating = false;
     isWaitingForGesture = false;
     isRecordingGesture = true;
-    recordingCountdown = 5; // Exactly 5 seconds
+    recordingCountdown = 20; // Exactly 20 seconds
     notifyListeners();
 
     // Ensure raw accelerometer stream is running
@@ -619,23 +640,7 @@ class RingBleManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _abortRecording(String reason) {
-    _recordingTimer?.cancel();
-    _recordingTimer = null;
-    _silenceTimer?.cancel();
-    _silenceTimer = null;
-    isRecordingGesture = false;
-    isWaitingForGesture = false;
-    isCalibrating = false;
-    _baselineWindow.clear();
-    recordedSamples.clear();
-    recordingStatusMessage = reason;
-    if (!gestureActionsEnabled) {
-      stopStream();
-    }
-    notifyListeners();
-    addLog("❌ $reason", tag: 'warn');
-  }
+
 
   void clearRecordedSamples() {
     recordedSamples.clear();
@@ -1048,7 +1053,7 @@ class RingBleManager extends ChangeNotifier {
       final elapsed = now.difference(_lastRateCheck!).inMilliseconds;
       if (elapsed >= 3000) {
         final hz = (_packetCount * 1000 / elapsed).toStringAsFixed(1);
-        addLog("📡 Частота данных кольца: $hz Гц (${ _packetCount} пакетов за ${(elapsed/1000).toStringAsFixed(1)}с)", tag: 'info');
+        addLog("📡 Частота данных кольца: $hz Гц ($_packetCount пакетов за ${(elapsed/1000).toStringAsFixed(1)}с)", tag: 'info');
         _packetCount = 0;
         _lastRateCheck = now;
       }
@@ -1080,21 +1085,41 @@ class RingBleManager extends ChangeNotifier {
           _handleRecordingSample(currentMag);
         }
 
-        // 2. Process real-time custom gesture DTW matching (directly on incoming packets)
-        // This ensures matching works in the background when the app is minimized.
+        // 2. Process real-time custom gesture DTW matching with active motion detection
         if (gestureActionsEnabled && !isRecordingGesture && !isWaitingForGesture) {
-          _liveMagnitudeWindow.add(currentMag);
-          // Keep a large circular buffer (max 500 pts ≈ 10s) to handle long gestures
-          if (_liveMagnitudeWindow.length > 500) {
-            _liveMagnitudeWindow.removeAt(0);
+          // Update baseline slowly when not actively moving
+          if (!_isMovingActive) {
+            _runningBaseline = _runningBaseline * 0.95 + currentMag * 0.05;
           }
-          // Run checks as soon as we have enough data for the shortest template
-          final minTemplateLen = gestureRules
-              .where((r) => r.triggerType == "custom" && r.template != null && r.template!.length >= 2)
-              .map((r) => r.template!.length)
-              .fold<int>(2, (prev, len) => len < prev ? len : prev);
-          if (_liveMagnitudeWindow.length >= minTemplateLen) {
-            _checkCustomGestures();
+
+          final deviation = (currentMag - _runningBaseline).abs();
+          const double motionThreshold = 180.0;
+
+          if (deviation > motionThreshold) {
+            if (!_isMovingActive) {
+              _isMovingActive = true;
+              _activeMotionBuffer.clear();
+              addLog("⚡ Начато движение для жеста...", tag: 'info');
+            }
+            _quietSampleCount = 0;
+            _activeMotionBuffer.add(currentMag);
+          } else {
+            if (_isMovingActive) {
+              _activeMotionBuffer.add(currentMag);
+              _quietSampleCount++;
+              // 15 samples of quiet at ~50Hz is about 300ms
+              if (_quietSampleCount > 15) {
+                _isMovingActive = false;
+                _processFinishedGesture();
+              }
+            }
+          }
+
+          if (_activeMotionBuffer.length > 300) {
+            // More than 6 seconds of movement, reset
+            _isMovingActive = false;
+            _activeMotionBuffer.clear();
+            addLog("⚠️ Движение слишком длинное, сброс", tag: 'warn');
           }
         }
 
