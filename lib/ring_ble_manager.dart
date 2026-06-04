@@ -167,6 +167,7 @@ class RingBleManager extends ChangeNotifier {
 
   bool gestureActionsEnabled = false;
   double gestureThreshold = 2200.0;
+  double customGestureThreshold = 0.65;
   String assignedActionType = "webhook"; // "webhook" or "ble_command"
   String assignedActionPayload = "";
   bool showNamelessDevices = false;
@@ -238,6 +239,7 @@ class RingBleManager extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       gestureActionsEnabled = prefs.getBool("gesture_actions_enabled") ?? false;
       gestureThreshold = prefs.getDouble("gesture_threshold") ?? 2200.0;
+      customGestureThreshold = prefs.getDouble("custom_gesture_threshold") ?? 0.65;
       assignedActionType = prefs.getString("assigned_action_type") ?? "webhook";
       assignedActionPayload = prefs.getString("assigned_action_payload") ?? "";
       wakeGestureEnabled = prefs.getBool("wake_gesture_enabled") ?? false;
@@ -313,6 +315,7 @@ class RingBleManager extends ChangeNotifier {
   Future<void> saveGestureSettings({
     bool? enabled,
     double? threshold,
+    double? customThreshold,
     String? type,
     String? payload,
     bool? wakeEnabled,
@@ -331,6 +334,10 @@ class RingBleManager extends ChangeNotifier {
       if (threshold != null) {
         gestureThreshold = threshold;
         await prefs.setDouble("gesture_threshold", threshold);
+      }
+      if (customThreshold != null) {
+        customGestureThreshold = customThreshold;
+        await prefs.setDouble("custom_gesture_threshold", customThreshold);
       }
       if (type != null) {
         assignedActionType = type;
@@ -492,7 +499,7 @@ class RingBleManager extends ChangeNotifier {
     double bestNormalizedDist = double.infinity;
 
     for (var rule in gestureRules) {
-      if (rule.triggerType != "custom" || rule.template == null || rule.template!.length < 10) continue;
+      if (rule.triggerType != "custom" || rule.template == null || rule.template!.length < 2) continue;
 
       final templateLen = rule.template!.length;
 
@@ -515,8 +522,8 @@ class RingBleManager extends ChangeNotifier {
       }
     }
 
-    // Threshold: normalized DTW per-point distance < 0.4 is a match
-    if (bestRule != null && bestNormalizedDist < 0.4) {
+    // Threshold: normalized DTW per-point distance less than user settings is a match
+    if (bestRule != null && bestNormalizedDist < customGestureThreshold) {
       _lastGestureTrigger = now;
       _triggerCustomGestureAction(bestRule, bestNormalizedDist);
     }
@@ -1072,9 +1079,9 @@ class RingBleManager extends ChangeNotifier {
           }
           // Run checks as soon as we have enough data for the shortest template
           final minTemplateLen = gestureRules
-              .where((r) => r.triggerType == "custom" && r.template != null && r.template!.length >= 10)
+              .where((r) => r.triggerType == "custom" && r.template != null && r.template!.length >= 2)
               .map((r) => r.template!.length)
-              .fold<int>(10, (prev, len) => len < prev ? len : prev);
+              .fold<int>(2, (prev, len) => len < prev ? len : prev);
           if (_liveMagnitudeWindow.length >= minTemplateLen) {
             _checkCustomGestures();
           }

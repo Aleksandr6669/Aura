@@ -1467,18 +1467,20 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
   Widget build(BuildContext context) {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
-    return Selector<RingBleManager, (bool, double, int, bool)>(
+    return Selector<RingBleManager, (bool, double, double, int, bool)>(
       selector: (_, m) => (
         m.gestureActionsEnabled,
         m.gestureThreshold,
+        m.customGestureThreshold,
         m.rulesVersion,
         m.wakeGestureEnabled,
       ),
       builder: (context, data, _) {
         final gestureActionsEnabled = data.$1;
-        final gestureThreshold = data.$2;
-        // rulesVersion (data.$3) is used by Selector to trigger rebuilds
-        final wakeGestureEnabled = data.$4;
+        final gestureThreshold = data.;
+        final customGestureThreshold = data.;
+        // rulesVersion (data.) is used by Selector to trigger rebuilds
+        final wakeGestureEnabled = data.;
         final gestureRules = manager.gestureRules;
 
         return Scaffold(
@@ -1611,6 +1613,46 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                           inactiveColor: const Color(0xFF232035),
                           onChanged: (val) {
                             manager.saveGestureSettings(threshold: val);
+                          },
+                        ),
+                        const Divider(color: Color(0xFF232035), height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Точность распознавания (DTW)",
+                                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  "Меньше = строже (точнее), больше = легче срабатывает",
+                                  style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                ),
+                              ],
+                            ),
+                            Text(
+                              customGestureThreshold.toStringAsFixed(2),
+                              style: const TextStyle(
+                                color: Color(0xFF74C7EC),
+                                fontSize: 13,
+                                fontFamily: 'Fira Code',
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Slider(
+                          value: customGestureThreshold,
+                          min: 0.3,
+                          max: 0.9,
+                          divisions: 12,
+                          activeColor: const Color(0xFF74C7EC),
+                          inactiveColor: const Color(0xFF232035),
+                          onChanged: (val) {
+                            manager.saveGestureSettings(customThreshold: val);
                           },
                         ),
                         const Divider(color: Color(0xFF232035), height: 24),
