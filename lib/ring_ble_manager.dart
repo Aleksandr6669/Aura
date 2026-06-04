@@ -52,8 +52,25 @@ class RingBleManager extends ChangeNotifier {
   final List<BluetoothCharacteristic> notifyChars = [];
   final List<StreamSubscription<List<int>>> _notifySubs = [];
 
-  BluetoothCharacteristic? get writeChar => writeChars.isNotEmpty ? writeChars.first : null;
-  BluetoothCharacteristic? get notifyChar => notifyChars.isNotEmpty ? notifyChars.first : null;
+  BluetoothCharacteristic? get writeChar {
+    if (writeChars.isEmpty) return null;
+    for (var char in writeChars) {
+      if (char.uuid.toString().toLowerCase() == rxtxWriteCharacteristicUuid.toLowerCase()) {
+        return char;
+      }
+    }
+    return writeChars.first;
+  }
+
+  BluetoothCharacteristic? get notifyChar {
+    if (notifyChars.isEmpty) return null;
+    for (var char in notifyChars) {
+      if (char.uuid.toString().toLowerCase() == rxtxNotifyCharacteristicUuid.toLowerCase()) {
+        return char;
+      }
+    }
+    return notifyChars.first;
+  }
 
   bool userDisconnected = false;
   DateTime? _lastNotifyTime;
@@ -595,7 +612,7 @@ class RingBleManager extends ChangeNotifier {
     if (data.isEmpty) return;
 
     // 1. Accelerometer packets (0xA1 with subtype 0x03)
-    if (data[0] == 0xA1 && data.length >= 10) {
+    if (data[0] == 0xA1 && data.length >= 8) {
       final subtype = data[1];
       if (subtype == 0x03) {
         // Decode signed 12-bit integer values correctly (0 to 4095 raw, sign-extended at 2048)
@@ -695,12 +712,11 @@ class RingBleManager extends ChangeNotifier {
   }
 
   Future<void> writeCommand(String hexString) async {
-    if (writeChars.isEmpty || !isConnected) return;
+    final char = writeChar;
+    if (char == null || !isConnected) return;
     try {
       final bytes = createCommand(hexString);
-      for (var char in writeChars) {
-        await char.write(bytes, withoutResponse: true);
-      }
+      await char.write(bytes, withoutResponse: true);
     } catch (e) {
       addLog("Transmission error: $e", tag: 'error');
     }
@@ -760,7 +776,8 @@ class RingBleManager extends ChangeNotifier {
         if (isDisposed || !isConnected) break;
         final symbol = symbols[s];
 
-        for (var char in writeChars) {
+        final char = writeChar;
+        if (char != null) {
           await char.write(onCmd, withoutResponse: true);
         }
         if (symbol == '.') {
@@ -769,7 +786,7 @@ class RingBleManager extends ChangeNotifier {
           await Future.delayed(dashDuration);
         }
 
-        for (var char in writeChars) {
+        if (char != null) {
           await char.write(offCmd, withoutResponse: true);
         }
         await Future.delayed(symbolGap);

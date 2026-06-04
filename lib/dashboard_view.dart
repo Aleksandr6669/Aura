@@ -1045,255 +1045,245 @@ class DevicesTabContent extends StatelessWidget {
     final id = device.remoteId.str;
     final isConnecting = manager.connectionStatus == "Connecting...";
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF152A22),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF225741), width: 1.5),
-          ),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.bluetooth_connected_rounded,
-                color: Color(0xFFA6E3A1),
-                size: 26,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
+    return GestureDetector(
+      onTap: () {
+        if (manager.isConnected) {
+          _showServicesBottomSheet(context, manager, device);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF152A22),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF225741), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.bluetooth_connected_rounded,
+              color: Color(0xFFA6E3A1),
+              size: 26,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    id,
+                    style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
+                  ),
+                  if (isConnecting) ...[
                     const SizedBox(height: 4),
-                    Text(
-                      id,
-                      style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
+                    const Text(
+                      "Connecting...",
+                      style: TextStyle(color: Color(0xFFF9E2AF), fontSize: 11, fontWeight: FontWeight.bold),
                     ),
-                    if (isConnecting) ...[
-                      const SizedBox(height: 4),
+                  ] else if (manager.isConnected) ...[
+                    const SizedBox(height: 4),
+                    const Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded, size: 10, color: Color(0xFFA6E3A1)),
+                        SizedBox(width: 4),
+                        Text(
+                          "Tap to view services & channels",
+                          style: TextStyle(color: Color(0xFFA6E3A1), fontSize: 10, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            ElevatedButton(
+              onPressed: manager.disconnectDevice,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFF38BA8),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text(
+                "Disconnect",
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showServicesBottomSheet(BuildContext context, RingBleManager manager, BluetoothDevice device) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0F0F17),
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (context, scrollController) {
+            return Container(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: ListView(
+                controller: scrollController,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 5,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2E2A47),
+                        borderRadius: BorderRadius.circular(2.5),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      const Icon(Icons.cable_rounded, color: Color(0xFF74C7EC)),
+                      const SizedBox(width: 8),
                       const Text(
-                        "Connecting...",
-                        style: TextStyle(color: Color(0xFFF9E2AF), fontSize: 11, fontWeight: FontWeight.bold),
+                        "GATT Services & Channels",
+                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, color: Color(0xFF9E9BAC)),
+                        onPressed: () => Navigator.pop(context),
                       ),
                     ],
-                  ],
-                ),
-              ),
-              ElevatedButton(
-                onPressed: manager.disconnectDevice,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFF38BA8),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                child: const Text(
-                  "Disconnect",
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (manager.isConnected) ...[
-          const SizedBox(height: 12),
-          // Collapsible list of Mapped / Active Channels
-          Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              title: const Text(
-                "Active Mapped Channels",
-                style: TextStyle(color: Color(0xFF89B4FA), fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-              subtitle: Text(
-                "${manager.writeChars.length} write channels, ${manager.notifyChars.length} notify channels mapped",
-                style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 10),
-              ),
-              leading: const Icon(Icons.cable_rounded, color: Color(0xFF89B4FA), size: 20),
-              backgroundColor: const Color(0xFF13111C),
-              collapsedBackgroundColor: const Color(0xFF13111C),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Color(0xFF232035)),
-              ),
-              collapsedShape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Color(0xFF232035)),
-              ),
-              childrenPadding: const EdgeInsets.all(12),
-              children: [
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    "WRITE CHANNELS (COMMAND TRANSMISSION)",
-                    style: TextStyle(color: Color(0xFF6C6E85), fontSize: 9, fontWeight: FontWeight.bold),
                   ),
-                ),
-                const SizedBox(height: 6),
-                ...manager.writeChars.map((char) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4.0),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.upload_rounded, color: Color(0xFFA6E3A1), size: 14),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              char.uuid.toString().toLowerCase(),
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontFamily: 'monospace'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )),
-                if (manager.writeChars.isEmpty)
-                  const Text("No active write channels mapped", style: TextStyle(color: Colors.grey, fontSize: 11)),
-                const Divider(color: Color(0xFF232035), height: 16),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    "NOTIFY CHANNELS (SUBSCRIBED SENSORS)",
-                    style: TextStyle(color: Color(0xFF6C6E85), fontSize: 9, fontWeight: FontWeight.bold),
+                  const Divider(color: Color(0xFF232035), height: 16),
+                  
+                  // 1. Mapped Channels
+                  const Text(
+                    "ACTIVE MAPPED CHANNELS",
+                    style: TextStyle(color: Color(0xFF89B4FA), fontSize: 11, fontWeight: FontWeight.bold),
                   ),
-                ),
-                const SizedBox(height: 6),
-                ...manager.notifyChars.map((char) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4.0),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.download_rounded, color: Color(0xFFFAB387), size: 14),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              char.uuid.toString().toLowerCase(),
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontFamily: 'monospace'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )),
-                if (manager.notifyChars.isEmpty)
-                  const Text("No active notify channels mapped", style: TextStyle(color: Colors.grey, fontSize: 11)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          // Collapsible list of raw GATT Services and Characteristics
-          Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              title: const Text(
-                "Discovered GATT Services",
-                style: TextStyle(color: Color(0xFFCBA6F7), fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-              subtitle: Text(
-                "${manager.discoveredServicesList.length} primary services discovered",
-                style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 10),
-              ),
-              leading: const Icon(Icons.account_tree_rounded, color: Color(0xFFCBA6F7), size: 20),
-              backgroundColor: const Color(0xFF13111C),
-              collapsedBackgroundColor: const Color(0xFF13111C),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Color(0xFF232035)),
-              ),
-              collapsedShape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Color(0xFF232035)),
-              ),
-              childrenPadding: const EdgeInsets.all(12),
-              children: manager.discoveredServicesList.map((service) {
-                final sUuid = service.uuid.toString().toLowerCase();
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF181624),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF2B283E)),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF13111C),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF232035)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Write Channel (Command Transmission):",
+                          style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          manager.writeChar?.uuid.toString().toLowerCase() ?? "Not mapped",
+                          style: const TextStyle(color: Color(0xFFA6E3A1), fontSize: 11, fontFamily: 'monospace'),
+                        ),
+                        const Divider(color: Color(0xFF232035), height: 16),
+                        const Text(
+                          "Notify Channel (Subscribed Sensors):",
+                          style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          manager.notifyChar?.uuid.toString().toLowerCase() ?? "Not mapped",
+                          style: const TextStyle(color: Color(0xFFFAB387), fontSize: 11, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.settings_input_component_rounded, color: Color(0xFFCBA6F7), size: 14),
-                          const SizedBox(width: 6),
-                          const Text(
-                            "SERVICE:",
-                            style: TextStyle(color: Color(0xFFCBA6F7), fontSize: 10, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              sUuid,
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
+                  const SizedBox(height: 20),
+
+                  // 2. Discovered GATT Services
+                  Text(
+                    "DISCOVERED SERVICES (${manager.discoveredServicesList.length})",
+                    style: const TextStyle(color: Color(0xFFCBA6F7), fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  ...manager.discoveredServicesList.map((service) {
+                    final sUuid = service.uuid.toString().toLowerCase();
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF13111C),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF232035)),
                       ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        "CHARACTERISTICS:",
-                        style: TextStyle(color: Color(0xFF6C6E85), fontSize: 8, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 4),
-                      ...service.characteristics.map((char) {
-                        final cUuid = char.uuid.toString().toLowerCase();
-                        List<String> props = [];
-                        if (char.properties.read) props.add("READ");
-                        if (char.properties.write) props.add("WRITE");
-                        if (char.properties.writeWithoutResponse) props.add("WRITE_NO_RESP");
-                        if (char.properties.notify) props.add("NOTIFY");
-                        if (char.properties.indicate) props.add("INDICATE");
-                        
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
+                      child: Theme(
+                        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          title: Text(
+                            sUuid,
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                          ),
+                          leading: const Icon(Icons.settings_input_component_rounded, color: Color(0xFFCBA6F7), size: 16),
+                          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                          expandedAlignment: Alignment.centerLeft,
+                          children: service.characteristics.map((char) {
+                            final cUuid = char.uuid.toString().toLowerCase();
+                            List<String> props = [];
+                            if (char.properties.read) props.add("READ");
+                            if (char.properties.write) props.add("WRITE");
+                            if (char.properties.writeWithoutResponse) props.add("WRITE_NO_RESP");
+                            if (char.properties.notify) props.add("NOTIFY");
+                            if (char.properties.indicate) props.add("INDICATE");
+                            
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Icon(Icons.radio_button_checked_rounded, color: Color(0xFF9E9BAC), size: 10),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      cUuid,
-                                      style: const TextStyle(color: Color(0xFFD9E0EE), fontSize: 10, fontFamily: 'monospace'),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.radio_button_checked_rounded, color: Color(0xFF9E9BAC), size: 11),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          cUuid,
+                                          style: const TextStyle(color: Color(0xFFD9E0EE), fontSize: 11, fontFamily: 'monospace'),
+                                        ),
+                                      ),
+                                    ],
                                   ),
+                                  if (props.isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 19.0),
+                                      child: Text(
+                                        "[${props.join(', ')}]",
+                                        style: const TextStyle(color: Color(0xFF74C7EC), fontSize: 9, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
-                              if (props.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 16.0),
-                                  child: Text(
-                                    "[${props.join(', ')}]",
-                                    style: const TextStyle(color: Color(0xFF74C7EC), fontSize: 9, fontWeight: FontWeight.bold),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ],
-      ],
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
