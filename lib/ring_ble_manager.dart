@@ -276,20 +276,36 @@ class RingBleManager extends ChangeNotifier {
         // Add default example rules
         gestureRules = [
           GestureRule(
-            id: "default_shake",
-            name: "Vibrate / Disable (Example BLE)",
+            id: "default_shake_stream",
+            name: "Активация стрима встряхиванием",
             triggerType: "shake",
-            actionType: "ble_command",
-            payload: "a102",
+            actionType: "start_stream",
+            payload: "",
           ),
           GestureRule(
-            id: "default_webhook",
-            name: "Query Server (Example GET)",
+            id: "default_wrist_tap",
+            name: "Пример тапа (GET)",
             triggerType: "wrist_tap",
             actionType: "get",
             payload: "https://httpbin.org/get",
           ),
         ];
+        await saveGestureRules();
+      }
+
+      // Safeguard: if there is no rule with trigger 'shake', create default stream activation rule
+      final hasShakeRule = gestureRules.any((r) => r.triggerType == "shake");
+      if (!hasShakeRule) {
+        gestureRules.add(
+          GestureRule(
+            id: "default_shake_stream",
+            name: "Активация стрима встряхиванием",
+            triggerType: "shake",
+            actionType: "start_stream",
+            payload: "",
+          ),
+        );
+        rulesVersion++;
         await saveGestureRules();
       }
     } catch (e) {
@@ -1271,6 +1287,7 @@ class RingBleManager extends ChangeNotifier {
       }
       if (gestureActionsEnabled) {
         _triggerRulesFor("wrist_tap");
+        _triggerRulesFor("shake");
       }
     }
     // 3.5. Typing/Activity reporting (0x73 subtype 0x12)
@@ -1403,6 +1420,8 @@ class RingBleManager extends ChangeNotifier {
     if (!isConnected) return;
     _startPlaybackTimer();
     addLog("🟢 Запуск стрима акселерометра...", tag: 'info');
+    await writeCommand("0a0200");
+    await Future.delayed(const Duration(milliseconds: 300));
     await writeCommand("a104");
     _resetStreamTimeout();
   }

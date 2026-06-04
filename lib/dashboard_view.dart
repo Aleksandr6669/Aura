@@ -1944,36 +1944,38 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0B0A11),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  rule.actionType == "ble_command" ? Icons.settings_bluetooth_rounded : Icons.link_rounded,
-                  color: const Color(0xFF5D5A75),
-                  size: 14,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    rule.payload,
-                    style: const TextStyle(
-                      color: Color(0xFFE0DEF4),
-                      fontFamily: 'Fira Code',
-                      fontSize: 11,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+          if (rule.actionType != "start_stream" && rule.actionType != "stop_stream") ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0B0A11),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    rule.actionType == "ble_command" ? Icons.settings_bluetooth_rounded : Icons.link_rounded,
+                    color: const Color(0xFF5D5A75),
+                    size: 14,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      rule.payload,
+                      style: const TextStyle(
+                        color: Color(0xFFE0DEF4),
+                        fontFamily: 'Fira Code',
+                        fontSize: 11,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
           if (rule.triggerType == "custom" && rule.template != null) ...[
             const SizedBox(height: 8),
             Text(
