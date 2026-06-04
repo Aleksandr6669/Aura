@@ -195,10 +195,11 @@ class RingBleManager extends ChangeNotifier {
   static const int _silenceMs = 800;      // ms of quiet after which recording stops
   static const int _maxRecordingMs = 10000; // max 10 seconds
 
-  // Simple rolling baseline for motion detection (last 20 calm samples)
+  // Live calibration buffer (first N packets during wait = resting baseline)
   final List<double> _baselineWindow = [];
   static const int _baselineWindowSize = 20;
-  bool isCalibrating = false; // kept for UI compat, set briefly then cleared
+  static const int _calibrationPackets = 3; // only 3 packets needed at any rate
+  bool isCalibrating = false; // kept for UI compat
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<bool>? _scanningStateSub;
@@ -551,7 +552,7 @@ class RingBleManager extends ChangeNotifier {
     await Future.delayed(const Duration(milliseconds: 400));
 
     isWaitingForGesture = true;
-    recordingCountdown = 15; // 15 seconds to make gesture
+    recordingCountdown = 30; // 30 seconds — enough even at 1 Hz
     notifyListeners();
     addLog("⏳ Готов — сделайте любой жест кольцом!", tag: 'info');
 
@@ -572,73 +573,43 @@ class RingBleManager extends ChangeNotifier {
 
   /// Called from _parseNotificationData while waiting or recording
   void _handleRecordingSample(double mag) {
-    // ─── Phase: WAITING — detect motion using energy spike detection ──────────
+    // ─── WAITING PHASE ───────────────────────────────────────────────────────
     if (isWaitingForGesture) {
-      // Build a rolling baseline window from calm samples
       _baselineWindow.add(mag);
-      if (_baselineWindow.length > _baselineWindowSize) {
-        _baselineWindow.removeAt(0);
+
+      // First N packets: build resting baseline (live calibration)
+      if (_baselineWindow.length <= _calibrationPackets) {
+        if (_baselineWindow.length == _calibrationPackets) {
+          // Baseline ready — compute threshold = baseline × 1.35 (min +300)
+          _recordingBaseline = _baselineWindow.reduce((a, b) => a + b) / _baselineWindow.length;
+          _recordingActivityThreshold = _recordingBaseline + math.max(300.0, _recordingBaseline * 0.35);
+          addLog("⏳ Готов! покой=${_recordingBaseline.toStringAsFixed(0)}, порог=${_recordingActivityThreshold.toStringAsFixed(0)}", tag: 'info');
+        }
+        return; // still calibrating
       }
 
-      // Need at least 8 samples before checking (avoids false trigger on startup)
-      if (_baselineWindow.length < 8) return;
-
-      // Compute variance of the last 5 samples vs full window
-      final recentN = 5;
-      final recent = _baselineWindow.sublist(math.max(0, _baselineWindow.length - recentN));
-      final recentMean = recent.reduce((a, b) => a + b) / recent.length;
-      final recentVar = recent.map((x) => (x - recentMean) * (x - recentMean)).reduce((a, b) => a + b) / recent.length;
-
-      final allMean = _baselineWindow.reduce((a, b) => a + b) / _baselineWindow.length;
-      final allVar = _baselineWindow.map((x) => (x - allMean) * (x - allMean)).reduce((a, b) => a + b) / _baselineWindow.length;
-      // Prevent division by zero for flat signals
-      final baselineVar = math.max(allVar, 100.0);
-
-      // Motion detected when recent variance is 4x the baseline variance
-      final energyRatio = recentVar / baselineVar;
-      if (energyRatio > 4.0) {
+      // After calibration: simple absolute threshold check
+      if (mag > _recordingActivityThreshold) {
         isWaitingForGesture = false;
         isRecordingGesture = true;
         recordedSamples.clear();
         _recordingTimer?.cancel();
         recordingCountdown = _maxRecordingMs ~/ 1000;
         _recordingTimer = Timer(const Duration(milliseconds: _maxRecordingMs), stopRecordingGesture);
-        addLog("🔴 Движение обнаружено! (энергия=${energyRatio.toStringAsFixed(1)}x) Запись...", tag: 'info');
+        addLog("🔴 Движение! mag=${mag.toStringAsFixed(0)} > ${_recordingActivityThreshold.toStringAsFixed(0)} — Запись...", tag: 'info');
         notifyListeners();
       }
       return;
     }
 
-    // ─── Phase: RECORDING — collect samples ───────────────────────────────────
+    // ─── RECORDING PHASE ────────────────────────────────────────────────────
     if (isRecordingGesture) {
       recordedSamples.add(mag);
-
-      // Compute current energy to detect silence
-      final recentN = 5;
-      if (recordedSamples.length >= recentN) {
-        final tail = recordedSamples.sublist(recordedSamples.length - recentN);
-        final tailMean = tail.reduce((a, b) => a + b) / tail.length;
-        final tailVar = tail.map((x) => (x - tailMean) * (x - tailMean)).reduce((a, b) => a + b) / tail.length;
-        final baselineVar = math.max(
-          (_baselineWindow.isNotEmpty
-              ? _baselineWindow.map((x) {
-                  final m = _baselineWindow.reduce((a, b) => a + b) / _baselineWindow.length;
-                  return (x - m) * (x - m);
-                }).reduce((a, b) => a + b) / _baselineWindow.length
-              : 500.0),
-          100.0,
-        );
-        final isActive = tailVar / baselineVar > 2.0;
-        if (isActive) {
-          // Still moving — reset silence timer
-          _silenceTimer?.cancel();
-          _silenceTimer = Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
-        } else {
-          // Silent — start silence timer if not already running
-          _silenceTimer ??= Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
-        }
+      // Reset silence timer on every active sample, start it on quiet
+      if (mag > _recordingActivityThreshold) {
+        _silenceTimer?.cancel();
+        _silenceTimer = Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
       } else {
-        // Not enough samples yet, just start silence timer
         _silenceTimer ??= Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
       }
       notifyListeners();
@@ -1276,19 +1247,17 @@ class RingBleManager extends ChangeNotifier {
   Future<void> startStream() async {
     if (!isConnected) return;
     _startPlaybackTimer();
-    addLog("Initiating high-frequency sensor stream...", tag: 'info');
-    // Send standard setup/metrics command (tells ring to activate streaming parameters)
-    await writeCommand("0a0200");
-    await Future.delayed(const Duration(milliseconds: 300));
-    // Send enable raw accelerometer streaming command
-    await writeCommand("a104");
+    addLog("🟢 Запуск стрима акселерометра...", tag: 'info');
+    // 0x0A = accel controller, 0x01 = enable, 0x00 = default rate
+    await writeCommand("0a0100");
   }
 
   Future<void> stopStream() async {
     if (!isConnected) return;
     _stopPlaybackTimer();
-    addLog("Terminating sensor stream...", tag: 'info');
-    await writeCommand("a102");
+    addLog("🔴 Остановка стрима...", tag: 'info');
+    // 0x0A = accel controller, 0x02 = disable
+    await writeCommand("0a0200");
   }
 
   void _startPlaybackTimer() {
