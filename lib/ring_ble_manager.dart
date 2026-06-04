@@ -32,6 +32,20 @@ class LogMessage {
   }
 }
 
+class DiscoveredDevice {
+  final BluetoothDevice device;
+  final AdvertisementData advertisementData;
+  int rssi;
+  bool isPresent;
+
+  DiscoveredDevice({
+    required this.device,
+    required this.advertisementData,
+    required this.rssi,
+    this.isPresent = true,
+  });
+}
+
 class RingBleManager extends ChangeNotifier {
   BluetoothDevice? connectedDevice;
   BluetoothCharacteristic? writeChar;
@@ -66,7 +80,7 @@ class RingBleManager extends ChangeNotifier {
   // Terminal Console Logs
   final List<LogMessage> logs = [];
 
-  List<ScanResult> scanResults = [];
+  List<DiscoveredDevice> discoveredDevices = [];
   bool isScanning = false;
 
   bool gestureActionsEnabled = false;
@@ -269,6 +283,50 @@ class RingBleManager extends ChangeNotifier {
     }
   }
 
+  Future<bool> _checkConnectedSystemDevices() async {
+    if (isConnected || connectedDevice != null) return true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedId = prefs.getString("last_connected_device_id");
+
+      // On iOS, we need to provide the service UUIDs to find connected system devices.
+      final List<Guid> systemServiceUuids = [
+        Guid(mainServiceUuid),
+        Guid(rxtxServiceUuid),
+      ];
+
+      List<BluetoothDevice> connectedSystem = [];
+      try {
+        connectedSystem = await FlutterBluePlus.systemDevices(systemServiceUuids);
+      } catch (e) {
+        // Fallback in case systemDevices signature differs or we need to try without params
+        try {
+          connectedSystem = await FlutterBluePlus.systemDevices([]);
+        } catch (e2) {
+          addLog("Failed to retrieve system devices: $e2", tag: 'warn');
+        }
+      }
+
+      for (var device in connectedSystem) {
+        final name = device.platformName;
+        final address = device.remoteId.str.toUpperCase();
+        
+        final matchesSaved = savedId != null && address == savedId.toUpperCase();
+        final matchesName = deviceKeywords.any((kw) => name.toLowerCase().contains(kw.toLowerCase()));
+        final matchesMac = address == defaultMac.toUpperCase();
+
+        if (matchesSaved || (savedId == null && (matchesName || matchesMac))) {
+          addLog("Found system-connected device: '$name' [$address]. Connecting...", tag: 'success');
+          connectToDevice(device);
+          return true;
+        }
+      }
+    } catch (e) {
+      addLog("Error checking connected system devices: $e", tag: 'warn');
+    }
+    return false;
+  }
+
   // Initialize BLE Scanner & Autoconnect setup
   void startAutoconnectLoop() async {
     addLog("Initializing Bluetooth adapter...", tag: 'info');
@@ -292,7 +350,29 @@ class RingBleManager extends ChangeNotifier {
 
     _scanSub?.cancel();
     _scanSub = FlutterBluePlus.scanResults.listen((results) async {
-      scanResults = results;
+      // 1. Mark existing discovered devices as not present first if they aren't in results
+      final latestIds = results.map((r) => r.device.remoteId).toSet();
+      for (var d in discoveredDevices) {
+        if (!latestIds.contains(d.device.remoteId)) {
+          d.isPresent = false;
+        }
+      }
+
+      // 2. Add or update found devices
+      for (var r in results) {
+        final existingIdx = discoveredDevices.indexWhere((d) => d.device.remoteId == r.device.remoteId);
+        if (existingIdx != -1) {
+          discoveredDevices[existingIdx].rssi = r.rssi;
+          discoveredDevices[existingIdx].isPresent = true;
+        } else {
+          discoveredDevices.add(DiscoveredDevice(
+            device: r.device,
+            advertisementData: r.advertisementData,
+            rssi: r.rssi,
+            isPresent: true,
+          ));
+        }
+      }
       notifyListeners();
       
       final prefs = await SharedPreferences.getInstance();
@@ -329,13 +409,26 @@ class RingBleManager extends ChangeNotifier {
       }
     });
 
-    startManualScan();
+    // Check connected system devices before initiating scan
+    final foundSystemDevice = await _checkConnectedSystemDevices();
+    if (!foundSystemDevice) {
+      startManualScan();
+    }
   }
 
   void startManualScan() async {
-    if (isConnected) return;
+    if (isConnected || connectedDevice != null) return;
+
+    final foundSystemDevice = await _checkConnectedSystemDevices();
+    if (foundSystemDevice) return;
+
     addLog("Scanning for Bluetooth devices...", tag: 'info');
-    scanResults.clear();
+    
+    // Mark existing discovered devices as not present so they become gray
+    // until we discover them again in the new scan.
+    for (var d in discoveredDevices) {
+      d.isPresent = false;
+    }
     notifyListeners();
     
     try {
@@ -384,7 +477,11 @@ class RingBleManager extends ChangeNotifier {
         addLog("Connected successfully to smart ring.", tag: 'success');
         _discoverServices(device);
       } else if (state == BluetoothConnectionState.disconnected) {
-        _handleDisconnect();
+        // Only handle unexpected disconnects here if we were previously connected.
+        // This avoids calling _handleDisconnect() upon subscribing to the stream.
+        if (isConnected) {
+          _handleDisconnect(autoScanReconnect: true);
+        }
       }
     });
 
@@ -393,7 +490,7 @@ class RingBleManager extends ChangeNotifier {
       await device.connect(autoConnect: false, timeout: const Duration(seconds: 15));
     } catch (e) {
       addLog("Connection failed: $e", tag: 'error');
-      _handleDisconnect();
+      _handleDisconnect(autoScanReconnect: false);
     }
   }
 
@@ -427,8 +524,7 @@ class RingBleManager extends ChangeNotifier {
       } catch (e) {
         addLog("Error disconnecting: $e", tag: 'error');
       }
-      _handleDisconnect();
-      startManualScan();
+      _handleDisconnect(autoScanReconnect: false);
     }
   }
 
@@ -662,7 +758,7 @@ class RingBleManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _handleDisconnect() async {
+  void _handleDisconnect({bool autoScanReconnect = true}) async {
     isConnected = false;
     connectedDevice = null;
     writeChar = null;
@@ -677,7 +773,7 @@ class RingBleManager extends ChangeNotifier {
     addLog("Ring disconnected.", tag: 'warn');
 
     // Auto-scan and reconnect in the background if there's a saved device ID
-    if (!isDisposed) {
+    if (!isDisposed && autoScanReconnect) {
       final prefs = await SharedPreferences.getInstance();
       final savedId = prefs.getString("last_connected_device_id");
       if (savedId != null) {

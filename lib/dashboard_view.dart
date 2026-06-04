@@ -842,15 +842,15 @@ class DevicesTabContent extends StatelessWidget {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
     // Rebuilds ONLY when scanned devices, scanning state, showNamelessSetting, or connection state changes
-    return Selector<RingBleManager, (List<ScanResult>, bool, bool, BluetoothDevice?)>(
+    return Selector<RingBleManager, (List<DiscoveredDevice>, bool, bool, BluetoothDevice?)>(
       selector: (_, m) {
         // Filter out the connected device from scanner results to avoid duplication
-        final filtered = m.scanResults.where((r) {
-          if (m.connectedDevice != null && r.device.remoteId == m.connectedDevice!.remoteId) {
+        final filtered = m.discoveredDevices.where((d) {
+          if (m.connectedDevice != null && d.device.remoteId == m.connectedDevice!.remoteId) {
             return false;
           }
           if (m.showNamelessDevices) return true;
-          return r.device.platformName.trim().isNotEmpty || r.advertisementData.advName.trim().isNotEmpty;
+          return d.device.platformName.trim().isNotEmpty || d.advertisementData.advName.trim().isNotEmpty;
         }).toList();
         return (filtered, m.isScanning, m.showNamelessDevices, m.connectedDevice);
       },
@@ -962,6 +962,7 @@ class DevicesTabContent extends StatelessWidget {
                           if (idx >= filteredList.length) return const SizedBox.shrink();
                           final scanResult = filteredList[idx];
                           final device = scanResult.device;
+                          final isPresent = scanResult.isPresent;
                           
                           final name = device.platformName.isEmpty 
                               ? (scanResult.advertisementData.advName.isEmpty 
@@ -982,9 +983,9 @@ class DevicesTabContent extends StatelessWidget {
                             ),
                             child: Row(
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.bluetooth_rounded,
-                                  color: Color(0xFF74C7EC),
+                                  color: isPresent ? const Color(0xFF74C7EC) : Colors.grey,
                                   size: 24,
                                 ),
                                 const SizedBox(width: 12),
@@ -994,12 +995,19 @@ class DevicesTabContent extends StatelessWidget {
                                     children: [
                                       Text(
                                         name,
-                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                        style: TextStyle(
+                                          color: isPresent ? Colors.white : Colors.grey,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
                                         id,
-                                        style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                        style: TextStyle(
+                                          color: isPresent ? const Color(0xFF6C6E85) : Colors.grey.shade700,
+                                          fontSize: 11,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -1010,7 +1018,11 @@ class DevicesTabContent extends StatelessWidget {
                                     Text(
                                       "$rssi dBm",
                                       style: TextStyle(
-                                        color: rssi > -70 ? const Color(0xFFA6E3A1) : const Color(0xFFFAB387),
+                                        color: !isPresent
+                                            ? Colors.grey
+                                            : rssi > -70
+                                                ? const Color(0xFFA6E3A1)
+                                                : const Color(0xFFFAB387),
                                         fontSize: 11,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -1021,8 +1033,8 @@ class DevicesTabContent extends StatelessWidget {
                                       child: ElevatedButton(
                                         onPressed: () => manager.connectToDevice(device),
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: const Color(0xFF2A283E),
-                                          foregroundColor: Colors.white,
+                                          backgroundColor: isPresent ? const Color(0xFF2A283E) : const Color(0xFF1E1C2E),
+                                          foregroundColor: isPresent ? Colors.white : Colors.grey,
                                           padding: const EdgeInsets.symmetric(horizontal: 12),
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                         ),
