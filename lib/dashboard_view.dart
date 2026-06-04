@@ -2097,6 +2097,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                           const SizedBox(height: 8),
                           Consumer<RingBleManager>(
                             builder: (context, liveManager, _) {
+                              final isCalibrating = liveManager.isCalibrating;
                               final isWaiting = liveManager.isWaitingForGesture;
                               final isRecording = liveManager.isRecordingGesture;
                               final countdown = liveManager.recordingCountdown;
@@ -2107,12 +2108,48 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                               if (liveManager.recordingDone &&
                                   capturedTemplate.isEmpty &&
                                   liveManager.recordedSamples.isNotEmpty) {
-                                // Schedule after frame so we don't call setState during build
                                 WidgetsBinding.instance.addPostFrameCallback((_) {
                                   setModalState(() {
                                     capturedTemplate = List<double>.from(liveManager.recordedSamples);
                                   });
                                 });
+                              }
+
+                              // ─── Phase: КАЛИБРОВКА — измеряем уровень покоя ───
+                              if (isCalibrating) {
+                                return Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1A1A2E),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFF585B70)),
+                                  ),
+                                  child: const Column(
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF9399B2)),
+                                          ),
+                                          SizedBox(width: 10),
+                                          Text(
+                                            "КАЛИБРОВКА...",
+                                            style: TextStyle(color: Color(0xFF9399B2), fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                      SizedBox(height: 8),
+                                      Text(
+                                        "Держите кольцо неподвижно ~1 секунду — идёт измерение уровня покоя",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: Color(0xFF585B70), fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                );
                               }
 
                               // ─── Phase: ОЖИДАНИЕ — ждём движения ───

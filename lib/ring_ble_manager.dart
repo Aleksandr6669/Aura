@@ -194,6 +194,11 @@ class RingBleManager extends ChangeNotifier {
   double _recordingBaseline = 0.0;        // resting magnitude reference
   static const int _silenceMs = 800;      // ms of quiet after which recording stops
   static const int _maxRecordingMs = 10000; // max 10 seconds
+  static const int _calibrationSamples = 60; // ~1.2s at 50Hz to measure resting level
+
+  // Calibration state
+  bool isCalibrating = false;
+  final List<double> _calibrationBuffer = [];
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<bool>? _scanningStateSub;
@@ -531,35 +536,28 @@ class RingBleManager extends ChangeNotifier {
       return;
     }
 
-    // Cancel any previous recording state cleanly
+    // Reset all state cleanly
     _recordingTimer?.cancel();
     _silenceTimer?.cancel();
     recordedSamples.clear();
+    _calibrationBuffer.clear();
     isRecordingGesture = false;
     isWaitingForGesture = false;
+    isCalibrating = false;
 
-    // Ensure raw accelerometer sensor stream is running
+    // Ensure raw accelerometer stream is running
     await startStream();
 
-    // Compute baseline from recent calm data (use current live window average)
-    if (_liveMagnitudeWindow.isNotEmpty) {
-      _recordingBaseline = _liveMagnitudeWindow.reduce((a, b) => a + b) / _liveMagnitudeWindow.length;
-    } else {
-      _recordingBaseline = 1000.0; // Fallback resting magnitude
-    }
-    // Activity threshold = baseline + 20% extra or at least +400
-    _recordingActivityThreshold = _recordingBaseline + math.max(400.0, _recordingBaseline * 0.25);
-
-    // Enter waiting-for-motion phase
-    isWaitingForGesture = true;
-    recordingCountdown = 10; // Max wait: 10 seconds
+    // Phase 0: CALIBRATION — collect live packets to measure actual resting level
+    isCalibrating = true;
+    recordingCountdown = 12; // total budget: 2s calibration + 10s wait
     notifyListeners();
-    addLog("⏳ Готов к записи — сделайте жест кольцом! (базовый уровень: ${_recordingBaseline.toStringAsFixed(0)})", tag: 'info');
+    addLog("🔍 Калибровка... Держите кольцо неподвижно (1 сек)", tag: 'info');
 
-    // Safety timer: abort if no gesture starts within 10 seconds
+    // Safety countdown timer
     _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!isWaitingForGesture && !isRecordingGesture) {
-        timer.cancel(); // Already done
+      if (!isCalibrating && !isWaitingForGesture && !isRecordingGesture) {
+        timer.cancel();
         return;
       }
       recordingCountdown--;
@@ -571,43 +569,54 @@ class RingBleManager extends ChangeNotifier {
     });
   }
 
-  /// Called from _parseNotificationData while waiting or recording
+  /// Called from _parseNotificationData while calibrating, waiting or recording
   void _handleRecordingSample(double mag) {
+    // ─── Phase 0: CALIBRATION — measure actual resting level ─────────────────
+    if (isCalibrating) {
+      _calibrationBuffer.add(mag);
+      if (_calibrationBuffer.length >= _calibrationSamples) {
+        // Compute resting baseline and set threshold 40% above it
+        _recordingBaseline = _calibrationBuffer.reduce((a, b) => a + b) / _calibrationBuffer.length;
+        // Threshold = baseline + 40%, but minimum +300 to avoid false triggers from breathing
+        _recordingActivityThreshold = _recordingBaseline + math.max(300.0, _recordingBaseline * 0.40);
+        isCalibrating = false;
+        isWaitingForGesture = true;
+        addLog("⏳ Готов — сделайте жест! покой: ${_recordingBaseline.toStringAsFixed(0)}, порог: ${_recordingActivityThreshold.toStringAsFixed(0)}", tag: 'info');
+        notifyListeners();
+      }
+      return;
+    }
+
+    // ─── Phase 1: WAITING — detect motion start ──────────────────────────────
     if (isWaitingForGesture) {
-      // Check if motion has started
       if (mag > _recordingActivityThreshold) {
-        // Motion detected — switch from waiting to recording
         isWaitingForGesture = false;
         isRecordingGesture = true;
         recordedSamples.clear();
-        _recordingTimer?.cancel(); // Cancel the 10-second wait timeout
+        _recordingTimer?.cancel();
         recordingCountdown = _maxRecordingMs ~/ 1000;
-        // Start max-duration safety timer
         _recordingTimer = Timer(const Duration(milliseconds: _maxRecordingMs), () {
           stopRecordingGesture();
         });
-        addLog("🔴 Движение обнаружено! Запись...", tag: 'info');
+        addLog("🔴 Движение обнаружено! (mag=${mag.toStringAsFixed(0)} > порог=${_recordingActivityThreshold.toStringAsFixed(0)}) Запись...", tag: 'info');
         notifyListeners();
       }
-      return; // Don't collect samples yet
+      return;
     }
 
+    // ─── Phase 2: RECORDING — collect samples ───────────────────────────────
     if (isRecordingGesture) {
       recordedSamples.add(mag);
-
-      // Reset the silence timer on every sample above threshold
       if (mag > _recordingActivityThreshold) {
         _silenceTimer?.cancel();
         _silenceTimer = Timer(const Duration(milliseconds: _silenceMs), () {
           stopRecordingGesture();
         });
       } else {
-        // If motion is quiet, start silence timer if not already running
         _silenceTimer ??= Timer(const Duration(milliseconds: _silenceMs), () {
           stopRecordingGesture();
         });
       }
-
       notifyListeners();
     }
   }
@@ -639,6 +648,8 @@ class RingBleManager extends ChangeNotifier {
     _silenceTimer = null;
     isRecordingGesture = false;
     isWaitingForGesture = false;
+    isCalibrating = false;
+    _calibrationBuffer.clear();
     recordedSamples.clear();
     recordingStatusMessage = reason;
     notifyListeners();
@@ -647,8 +658,10 @@ class RingBleManager extends ChangeNotifier {
 
   void clearRecordedSamples() {
     recordedSamples.clear();
+    _calibrationBuffer.clear();
     isRecordingGesture = false;
     isWaitingForGesture = false;
+    isCalibrating = false;
     recordingDone = false;
     recordingStatusMessage = "";
     _recordingTimer?.cancel();
@@ -1054,8 +1067,8 @@ class RingBleManager extends ChangeNotifier {
         // Vector Magnitude calculation
         double currentMag = math.sqrt(currentX * currentX + currentY * currentY + currentZ * currentZ);
 
-        // 1. Smart gesture recording/waiting (directly on incoming packets)
-        if (isWaitingForGesture || isRecordingGesture) {
+        // 1. Smart gesture recording / calibrating / waiting (directly on incoming packets)
+        if (isCalibrating || isWaitingForGesture || isRecordingGesture) {
           _handleRecordingSample(currentMag);
         }
 
