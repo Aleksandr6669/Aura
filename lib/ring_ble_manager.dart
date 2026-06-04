@@ -56,11 +56,13 @@ class RingBleManager extends ChangeNotifier {
   BluetoothCharacteristic? get notifyChar => notifyChars.isNotEmpty ? notifyChars.first : null;
 
   bool userDisconnected = false;
+  DateTime? _lastNotifyTime;
 
   bool isConnected = false;
   String connectionStatus = "Scanning...";
   String batteryInfo = "-";
   bool filterEnabled = true;
+  List<BluetoothService> discoveredServicesList = [];
 
   // Real-time trace values
   double lastX = 0.0;
@@ -380,11 +382,6 @@ class RingBleManager extends ChangeNotifier {
   void startManualScan() async {
     if (isConnected || connectedDevice != null) return;
 
-    userDisconnected = false;
-
-    final foundSystemDevice = await _checkConnectedSystemDevices();
-    if (foundSystemDevice) return;
-
     addLog("Scanning for Bluetooth devices...", tag: 'info');
     
     // Mark existing discovered devices as not present so they become gray
@@ -392,6 +389,48 @@ class RingBleManager extends ChangeNotifier {
     for (var d in discoveredDevices) {
       d.isPresent = false;
     }
+
+    // Query system-connected devices and add them to the list as active so they can be selected manually
+    try {
+      final List<Guid> systemServiceUuids = [
+        Guid(mainServiceUuid),
+        Guid(rxtxServiceUuid),
+      ];
+      List<BluetoothDevice> connectedSystem = [];
+      try {
+        connectedSystem = await FlutterBluePlus.systemDevices(systemServiceUuids);
+      } catch (_) {
+        try {
+          connectedSystem = await FlutterBluePlus.systemDevices([]);
+        } catch (_) {}
+      }
+
+      for (var device in connectedSystem) {
+        final existingIdx = discoveredDevices.indexWhere((d) => d.device.remoteId == device.remoteId);
+        if (existingIdx != -1) {
+          discoveredDevices[existingIdx].isPresent = true;
+          discoveredDevices[existingIdx].rssi = -50;
+        } else {
+          discoveredDevices.add(DiscoveredDevice(
+            device: device,
+            advertisementData: AdvertisementData(
+              advName: device.platformName,
+              txPowerLevel: null,
+              connectable: true,
+              manufacturerData: {},
+              serviceData: {},
+              serviceUuids: [],
+              appearance: null,
+            ),
+            rssi: -50,
+            isPresent: true,
+          ));
+        }
+      }
+    } catch (e) {
+      addLog("Error reading system devices during scan: $e", tag: 'warn');
+    }
+
     notifyListeners();
     
     try {
@@ -498,6 +537,8 @@ class RingBleManager extends ChangeNotifier {
       addLog("Discovering primary GATT services...", tag: 'info');
       await Future.delayed(const Duration(milliseconds: 600));
       final services = await device.discoverServices();
+      discoveredServicesList = services;
+      notifyListeners();
       
       writeChars.clear();
       notifyChars.clear();
@@ -557,15 +598,15 @@ class RingBleManager extends ChangeNotifier {
     if (data[0] == 0xA1 && data.length >= 10) {
       final subtype = data[1];
       if (subtype == 0x03) {
-        // Decode signed 12-bit integer values
+        // Decode signed 12-bit integer values correctly (0 to 4095 raw, sign-extended at 2048)
         int accX = ((data[6] << 4) | (data[7] & 0xF));
-        if ((data[6] & 0x8) != 0) accX -= (1 << 11);
+        if (accX >= 2048) accX -= 4096;
 
         int accY = ((data[2] << 4) | (data[3] & 0xF));
-        if ((data[2] & 0x8) != 0) accY -= (1 << 11);
+        if (accY >= 2048) accY -= 4096;
 
         int accZ = ((data[4] << 4) | (data[5] & 0xF));
-        if ((data[4] & 0x8) != 0) accZ -= (1 << 11);
+        if (accZ >= 2048) accZ -= 4096;
 
         // Apply low pass filter if enabled
         double rx = accX.toDouble();
@@ -612,7 +653,12 @@ class RingBleManager extends ChangeNotifier {
           }
         }
 
-        notifyListeners();
+        // Throttle UI notification updates to ~60Hz to maintain smooth rendering
+        final now = DateTime.now();
+        if (_lastNotifyTime == null || now.difference(_lastNotifyTime!) > const Duration(milliseconds: 16)) {
+          _lastNotifyTime = now;
+          notifyListeners();
+        }
       }
     }
     // 2. Battery response packets (0x03)
@@ -667,11 +713,20 @@ class RingBleManager extends ChangeNotifier {
     }
 
     final morseMap = {
+      // Latin
       'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.',
       'G': '--.', 'H': '....', 'I': '..', 'J': '.---', 'K': '-.-', 'L': '.-..',
       'M': '--', 'N': '-.', 'O': '---', 'P': '.--.', 'Q': '--.-', 'R': '.-.',
       'S': '...', 'T': '-', 'U': '..-', 'V': '...-', 'W': '.--', 'X': '-..-',
       'Y': '-.--', 'Z': '--..',
+      // Russian
+      'А': '.-', 'Б': '-...', 'В': '.--', 'Г': '--.', 'Д': '-..', 'Е': '.', 'Ё': '.',
+      'Ж': '...-', 'З': '--..', 'И': '..', 'Й': '.---', 'К': '-.-', 'Л': '.-..',
+      'М': '--', 'Н': '-.', 'О': '---', 'П': '.--.', 'Р': '.-.', 'С': '...',
+      'Т': '-', 'У': '..-', 'Ф': '..-.', 'Х': '....', 'Ц': '-.-.', 'Ч': '---.',
+      'Ш': '----', 'Щ': '--.-', 'Ъ': '--.--', 'Ы': '-.--', 'Ь': '-..-', 'Э': '..-..',
+      'Ю': '..--', 'Я': '.-.-',
+      // Numbers
       '1': '.----', '2': '..---', '3': '...--', '4': '....-', '5': '.....',
       '6': '-....', '7': '--...', '8': '---..', '9': '----.', '0': '-----'
     };
@@ -680,12 +735,19 @@ class RingBleManager extends ChangeNotifier {
     final onCmd = createCommand("a104");
     final offCmd = createCommand("a102");
 
+    // Base unit: 200ms (dot). Dash is 3 units (600ms).
+    const dotDuration = Duration(milliseconds: 200);
+    const dashDuration = Duration(milliseconds: 600);
+    const symbolGap = Duration(milliseconds: 200);
+    const letterGap = Duration(milliseconds: 600);
+    const wordGap = Duration(seconds: 1);
+
     for (int i = 0; i < text.length; i++) {
       if (isDisposed || !isConnected) break;
       final char = text[i].toUpperCase();
 
       if (char == ' ') {
-        await Future.delayed(const Duration(seconds: 2));
+        await Future.delayed(wordGap);
         continue;
       }
 
@@ -702,18 +764,18 @@ class RingBleManager extends ChangeNotifier {
           await char.write(onCmd, withoutResponse: true);
         }
         if (symbol == '.') {
-          await Future.delayed(const Duration(milliseconds: 400));
+          await Future.delayed(dotDuration);
         } else {
-          await Future.delayed(const Duration(milliseconds: 1200));
+          await Future.delayed(dashDuration);
         }
 
         for (var char in writeChars) {
           await char.write(offCmd, withoutResponse: true);
         }
-        await Future.delayed(const Duration(milliseconds: 400));
+        await Future.delayed(symbolGap);
       }
 
-      await Future.delayed(const Duration(milliseconds: 1200));
+      await Future.delayed(letterGap);
     }
 
     addLog("Finished Morse transmission.", tag: 'success');
@@ -734,6 +796,7 @@ class RingBleManager extends ChangeNotifier {
     connectedDevice = null;
     writeChars.clear();
     notifyChars.clear();
+    discoveredServicesList.clear();
     batteryInfo = "-";
     
     _connSub?.cancel();

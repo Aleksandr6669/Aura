@@ -8,12 +8,12 @@ class ScopeChart extends StatelessWidget {
   final List<double> historyMag;
 
   const ScopeChart({
-    Key? key,
+    super.key,
     required this.historyX,
     required this.historyY,
     required this.historyZ,
     required this.historyMag,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
