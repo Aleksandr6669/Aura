@@ -151,6 +151,10 @@ class RingBleManager extends ChangeNotifier {
   List<GestureRule> gestureRules = [];
   int rulesVersion = 0;
 
+  // Stream for gesture trigger events to show snackbars in UI
+  final StreamController<GestureRule> _gestureTriggerStreamController = StreamController<GestureRule>.broadcast();
+  Stream<GestureRule> get onGestureTriggered => _gestureTriggerStreamController.stream;
+
   // App running indicator
   bool isDisposed = false;
 
@@ -357,12 +361,16 @@ class RingBleManager extends ChangeNotifier {
     _triggerRulesFor("shake");
   }
 
-  void _triggerRulesFor(String triggerTypeOrId) async {
+  void _triggerRulesFor(String triggerTypeOrId, {bool isManual = false}) async {
     final rules = gestureRules.where((r) => r.triggerType == triggerTypeOrId || r.id == triggerTypeOrId).toList();
     if (rules.isEmpty) return;
 
     for (var rule in rules) {
       addLog("Executing action '${rule.name}'...", tag: 'info');
+
+      if (!isManual) {
+        _gestureTriggerStreamController.add(rule);
+      }
       if (rule.actionType == "ble_command") {
         await writeCommand(rule.payload);
       } else if (rule.actionType == "get") {
@@ -488,7 +496,7 @@ class RingBleManager extends ChangeNotifier {
   }
 
   void executeRule(String ruleId) {
-    _triggerRulesFor(ruleId);
+    _triggerRulesFor(ruleId, isManual: true);
   }
 
   // Start recording raw magnitude samples in real-time
@@ -917,7 +925,27 @@ class RingBleManager extends ChangeNotifier {
         // Vector Magnitude calculation
         double currentMag = math.sqrt(currentX * currentX + currentY * currentY + currentZ * currentZ);
 
-        // Gesture action check
+        // 1. Process custom gesture recording (directly on incoming packets)
+        if (isRecordingGesture) {
+          recordedSamples.add(currentMag);
+          if (recordedSamples.length >= 150) {
+            stopRecordingGesture();
+          }
+        }
+
+        // 2. Process real-time custom gesture DTW matching (directly on incoming packets)
+        // This ensures matching works in the background when the app is minimized and the periodic UI timer is paused.
+        if (gestureActionsEnabled && !isRecordingGesture) {
+          _liveMagnitudeWindow.add(currentMag);
+          if (_liveMagnitudeWindow.length > 150) {
+            _liveMagnitudeWindow.removeAt(0);
+          }
+          if (_liveMagnitudeWindow.length == 150) {
+            _checkCustomGestures();
+          }
+        }
+
+        // 3. Built-in shake gesture action check
         if (gestureActionsEnabled) {
           if (currentMag > gestureThreshold) {
             final now = DateTime.now();
@@ -1143,25 +1171,6 @@ class RingBleManager extends ChangeNotifier {
     historyY.add(y);
     historyZ.add(z);
     historyMag.add(mag);
-
-    // If recording a custom gesture, collect samples (limit to 150 samples)
-    if (isRecordingGesture) {
-      recordedSamples.add(mag);
-      if (recordedSamples.length >= 150) {
-        stopRecordingGesture();
-      }
-    }
-
-    // Update live sliding window for pattern matching
-    _liveMagnitudeWindow.add(mag);
-    if (_liveMagnitudeWindow.length > 150) {
-      _liveMagnitudeWindow.removeAt(0);
-    }
-
-    // Run custom gesture matching DTW checks
-    if (gestureActionsEnabled && !isRecordingGesture && _liveMagnitudeWindow.length == 150) {
-      _checkCustomGestures();
-    }
   }
 
   void _handleDisconnect({bool autoScanReconnect = true}) async {
@@ -1214,6 +1223,7 @@ class RingBleManager extends ChangeNotifier {
       }
     }
 
+    _gestureTriggerStreamController.close();
     super.dispose();
   }
 }

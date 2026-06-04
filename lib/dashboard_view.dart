@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -14,6 +15,35 @@ class DashboardView extends StatefulWidget {
 
 class _DashboardViewState extends State<DashboardView> {
   int _selectedTab = 0;
+  StreamSubscription<GestureRule>? _gestureSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final manager = Provider.of<RingBleManager>(context, listen: false);
+      _gestureSubscription = manager.onGestureTriggered.listen((rule) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF152A22),
+            content: Text(
+              "Жест распознан! Запущено действие: ${rule.name}",
+              style: const TextStyle(color: Color(0xFFA6E3A1), fontWeight: FontWeight.bold),
+            ),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _gestureSubscription?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1421,20 +1451,18 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
   Widget build(BuildContext context) {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
-    return Selector<RingBleManager, (bool, double, int, bool, bool)>(
+    return Selector<RingBleManager, (bool, double, int, bool)>(
       selector: (_, m) => (
         m.gestureActionsEnabled,
         m.gestureThreshold,
         m.rulesVersion,
-        m.gestureTriggeredAlert,
         m.wakeGestureEnabled,
       ),
       builder: (context, data, _) {
         final gestureActionsEnabled = data.$1;
         final gestureThreshold = data.$2;
         // rulesVersion (data.$3) is used by Selector to trigger rebuilds
-        final gestureTriggeredAlert = data.$4;
-        final wakeGestureEnabled = data.$5;
+        final wakeGestureEnabled = data.$4;
         final gestureRules = manager.gestureRules;
 
         return Scaffold(
@@ -1445,41 +1473,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // 1. Gesture Triggered Alert Card
-                  if (gestureTriggeredAlert)
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF38BA8).withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFF38BA8), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFFF38BA8).withOpacity(0.2),
-                            blurRadius: 10,
-                            spreadRadius: 1,
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.flash_on_rounded, color: Color(0xFFF38BA8), size: 24),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              "⚡ ЖЕСТ РАСПОЗНАН! ⚡",
-                              style: TextStyle(
-                                color: Color(0xFFF38BA8),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+
 
                   // 2. Main Master Switch Card
                   Container(
