@@ -2242,7 +2242,6 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                       ),
                                       const SizedBox(height: 12),
                                     ] else ...[
-                                      // Show error if last attempt failed
                                       if (statusMsg.isNotEmpty) ...[
                                         Row(
                                           children: [
@@ -2259,7 +2258,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                         const SizedBox(height: 8),
                                       ],
                                       const Text(
-                                        "Нажмите кнопку, затем сделайте любой жест кольцом — система запишет его автоматически.",
+                                        "Нажмите кнопку и сделайте жест. Запись начнется сразу и завершится через 5 секунд или при нажатии кнопки 'Завершить'.",
                                         style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
                                       ),
                                       const SizedBox(height: 12),

@@ -538,11 +538,6 @@ class RingBleManager extends ChangeNotifier {
   }
 
   // ─── Smart gesture recording ─────────────────────────────────────────────
-  // Phase 1: ARM  — user presses button, we compute baseline for 1s and wait
-  // Phase 2: WAIT — watching for motion that exceeds baseline + threshold
-  // Phase 3: REC  — collecting samples; silence timer resets on every active sample
-  // Phase 4: DONE — silence timer fires (or max duration), saves template
-
   Future<void> startRecordingGesture() async {
     if (!isConnected) {
       addLog("Кольцо не подключено — запись невозможна", tag: 'error');
@@ -554,29 +549,29 @@ class RingBleManager extends ChangeNotifier {
     _silenceTimer?.cancel();
     recordedSamples.clear();
     _baselineWindow.clear();
-    isRecordingGesture = false;
-    isWaitingForGesture = false;
     isCalibrating = false;
+    isWaitingForGesture = false;
+    isRecordingGesture = true;
+    recordingCountdown = 5; // Exactly 5 seconds
+    notifyListeners();
 
     // Ensure raw accelerometer stream is running
     await startStream();
-    // Give ring 400ms to start sending packets after command
-    await Future.delayed(const Duration(milliseconds: 400));
+    // Give ring 200ms to start sending packets
+    await Future.delayed(const Duration(milliseconds: 200));
 
-    isWaitingForGesture = true;
-    recordingCountdown = 30; // 30 seconds — enough even at 1 Hz
-    notifyListeners();
-    addLog("⏳ Готов — сделайте любой жест кольцом!", tag: 'info');
+    addLog("🔴 Запись пошла! Сделайте жест...", tag: 'info');
 
-    // Safety countdown timer
+    // Countdown and automatic stop timer
     _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!isWaitingForGesture && !isRecordingGesture) {
+      if (!isRecordingGesture) {
         timer.cancel();
         return;
       }
       recordingCountdown--;
       if (recordingCountdown <= 0) {
-        _abortRecording("Время истекло — жест не был обнаружен. Попробуйте снова.");
+        timer.cancel();
+        stopRecordingGesture();
       } else {
         notifyListeners();
       }
@@ -585,43 +580,10 @@ class RingBleManager extends ChangeNotifier {
 
   /// Called from _parseNotificationData while waiting or recording
   void _handleRecordingSample(double mag) {
-    // ─── WAITING PHASE ───────────────────────────────────────────────────────
-    if (isWaitingForGesture) {
-      if (_baselineWindow.isEmpty) {
-        _recordingBaseline = mag;
-        _baselineWindow.add(mag);
-        addLog("⏳ Готов! Базовая амплитуда: ${_recordingBaseline.toStringAsFixed(0)}", tag: 'info');
-        return;
-      }
-
-      final deviation = (mag - _recordingBaseline).abs();
-      // Deviation of 250 units is a reliable indicator of movement starting
-      if (deviation > 250.0) {
-        isWaitingForGesture = false;
-        isRecordingGesture = true;
-        recordedSamples.clear();
-        _recordingTimer?.cancel();
-        recordingCountdown = _maxRecordingMs ~/ 1000;
-        _recordingTimer = Timer(const Duration(milliseconds: _maxRecordingMs), stopRecordingGesture);
-        addLog("🔴 Движение! Отклонение: ${deviation.toStringAsFixed(0)} — Запись...", tag: 'info');
-        notifyListeners();
-      }
-      return;
-    }
 
     // ─── RECORDING PHASE ────────────────────────────────────────────────────
     if (isRecordingGesture) {
       recordedSamples.add(mag);
-      final deviation = (mag - _recordingBaseline).abs();
-      final isMoving = deviation > 200.0;
-      
-      // Reset silence timer on active movement, trigger stop when quiet
-      if (isMoving) {
-        _silenceTimer?.cancel();
-        _silenceTimer = Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
-      } else {
-        _silenceTimer ??= Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
-      }
       notifyListeners();
     }
   }
