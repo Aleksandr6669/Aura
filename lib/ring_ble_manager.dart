@@ -1270,16 +1270,14 @@ class RingBleManager extends ChangeNotifier {
     if (!isConnected) return;
     _startPlaybackTimer();
     addLog("🟢 Запуск стрима акселерометра...", tag: 'info');
-    // 0x0A = accel controller, 0x01 = enable, 0x00 = default rate
-    await writeCommand("0a0100");
+    await writeCommand("a104");
   }
 
   Future<void> stopStream() async {
     if (!isConnected) return;
     _stopPlaybackTimer();
     addLog("🔴 Остановка стрима...", tag: 'info');
-    // 0x0A = accel controller, 0x02 = disable
-    await writeCommand("0a0200");
+    await writeCommand("a102");
   }
 
   void _startPlaybackTimer() {
