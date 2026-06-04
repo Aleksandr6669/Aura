@@ -586,11 +586,11 @@ class RingBleManager extends ChangeNotifier {
 
         for (var char in notifyChars) {
           try {
-            await char.setNotifyValue(true);
-            final sub = char.lastValueStream.listen((data) {
+            final sub = char.onValueReceived.listen((data) {
               _parseNotificationData(data);
             });
             _notifySubs.add(sub);
+            await char.setNotifyValue(true);
             addLog("Subscribed to ${char.uuid.toString().substring(0, 8)}: isNotifying=${char.isNotifying}", tag: char.isNotifying ? 'success' : 'warn');
           } catch (e) {
             addLog("Failed to subscribe to ${char.uuid.toString().substring(0, 8)}: $e", tag: 'warn');
@@ -600,7 +600,7 @@ class RingBleManager extends ChangeNotifier {
         // Instantly query battery level
         await writeCommand("03");
 
-        addLog("Ring ready. Click 'Enable Sensor (a104)' in Controls tab to view real-time data.", tag: 'info');
+        addLog("Ring ready. Press 'Start' to stream data.", tag: 'info');
       } else {
         addLog("Error: Could not map GATT interface characteristics", tag: 'error');
       }

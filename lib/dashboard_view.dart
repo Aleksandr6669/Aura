@@ -77,12 +77,8 @@ class _DashboardViewState extends State<DashboardView> {
         children: [
           // Tab 1: Scope (listens to high-frequency stream)
           const ScopeTabContent(),
-          // Tab 2: Controls (uses selector to ignore accelerometer stream)
-          const ControlsTabContent(),
-          // Tab 3: Devices (uses selector to ignore accelerometer stream)
+          // Tab 2: Devices
           const DevicesTabContent(),
-          // Tab 4: Logs (uses selector for logs updates)
-          const LogsTabContent(),
         ],
       ),
       bottomNavigationBar: Container(
@@ -110,19 +106,9 @@ class _DashboardViewState extends State<DashboardView> {
               label: "Scope",
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.tune_rounded),
-              activeIcon: Icon(Icons.tune_rounded),
-              label: "Controls",
-            ),
-            BottomNavigationBarItem(
               icon: Icon(Icons.bluetooth_searching_rounded),
               activeIcon: Icon(Icons.bluetooth_connected_rounded),
               label: "Devices",
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.terminal_outlined),
-              activeIcon: Icon(Icons.terminal_rounded),
-              label: "Logs",
             ),
           ],
         ),
@@ -237,17 +223,47 @@ class ScopeTabContent extends StatelessWidget {
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () => manager.clearScope(),
-                    icon: const Icon(Icons.clear_all_rounded, size: 18),
-                    label: const Text("Clear Scope"),
+                    icon: const Icon(Icons.clear_all_rounded, size: 16),
+                    label: const Text("Clear"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF201D30),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: manager.isConnected ? () => manager.writeCommand("a104") : null,
+                    icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                    label: const Text("Start"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1C3A27),
+                      foregroundColor: const Color(0xFFA6E3A1),
+                      disabledBackgroundColor: const Color(0xFF13111C),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: manager.isConnected ? () => manager.writeCommand("a102") : null,
+                    icon: const Icon(Icons.stop_rounded, size: 16),
+                    label: const Text("Stop"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3A1C1C),
+                      foregroundColor: const Color(0xFFF38BA8),
+                      disabledBackgroundColor: const Color(0xFF13111C),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Container(
                   decoration: BoxDecoration(
                     color: const Color(0xFF13111C),
