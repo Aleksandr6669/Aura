@@ -2097,10 +2097,49 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                           const SizedBox(height: 8),
                           Consumer<RingBleManager>(
                             builder: (context, liveManager, _) {
+                              final isWaiting = liveManager.isWaitingForGesture;
                               final isRecording = liveManager.isRecordingGesture;
                               final countdown = liveManager.recordingCountdown;
                               final samplesCount = liveManager.recordedSamples.length;
 
+                              // ─── Phase 2: ОЖИДАНИЕ — готов, ждём движения ───
+                              if (isWaiting) {
+                                return Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1C1B2A),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFF74C7EC)),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          const SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF74C7EC)),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Text(
+                                            "ОЖИДАНИЕ ЖЕСТА... ($countdown c)",
+                                            style: const TextStyle(color: Color(0xFF74C7EC), fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        "Сделайте жест кольцом — система автоматически начнёт запись при обнаружении движения",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+
+                              // ─── Phase 3: ЗАПИСЬ — активная запись движения ───
                               if (isRecording) {
                                 return Container(
                                   padding: const EdgeInsets.all(16),
@@ -2120,29 +2159,31 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                             child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFF38BA8)),
                                           ),
                                           const SizedBox(width: 10),
-                                          Text(
-                                            "ЗАПИСЬ ЖЕСТА... ($countdown c)",
-                                            style: const TextStyle(color: Color(0xFFF38BA8), fontWeight: FontWeight.bold, fontSize: 13),
+                                          const Text(
+                                            "ЗАПИСЬ ДВИЖЕНИЯ...",
+                                            style: TextStyle(color: Color(0xFFF38BA8), fontWeight: FontWeight.bold, fontSize: 13),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 10),
-                                      LinearProgressIndicator(
-                                        value: samplesCount / 150.0,
-                                        backgroundColor: const Color(0xFF1E161C),
-                                        color: const Color(0xFFF38BA8),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        "Собрано: $samplesCount точек (~${(samplesCount / 50.0).toStringAsFixed(1)} сек)",
+                                        style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
                                       ),
                                       const SizedBox(height: 6),
-                                      Text(
-                                        "Собрано точек ускорения: $samplesCount из 150",
-                                        style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
+                                      const Text(
+                                        "Завершите движение — запись остановится автоматически",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: Color(0xFF5D5A75), fontSize: 10),
                                       ),
                                     ],
                                   ),
                                 );
                               }
 
-                              if (samplesCount >= 150) {
+                              // ─── Phase 4: ГОТОВО / НАЧАЛО ───
+                              // Grab the template when recording has just finished
+                              if (samplesCount >= 10 && capturedTemplate.isEmpty) {
                                 capturedTemplate = List<double>.from(liveManager.recordedSamples);
                               }
 
@@ -2173,13 +2214,13 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        "Сохранено точек сигнала: ${capturedTemplate.length} (профиль 3.0 секунды)",
+                                        "Длина: ${capturedTemplate.length} точек (~${(capturedTemplate.length / 50.0).toStringAsFixed(1)} сек)",
                                         style: const TextStyle(color: Color(0xFF9E9BAC), fontSize: 11),
                                       ),
                                       const SizedBox(height: 12),
                                     ] else ...[
                                       const Text(
-                                        "Жест еще не записан. Подключите кольцо и совершите движение в момент записи.",
+                                        "Нажмите кнопку, затем сделайте любой жест кольцом — система запишет его автоматически.",
                                         style: TextStyle(color: Color(0xFF6C6E85), fontSize: 11),
                                       ),
                                       const SizedBox(height: 12),
@@ -2189,7 +2230,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                           ? () => liveManager.startRecordingGesture()
                                           : null,
                                       icon: Icon(hasRecorded ? Icons.refresh_rounded : Icons.fiber_manual_record_rounded),
-                                      label: Text(hasRecorded ? "Перезаписать жест" : "Начать запись движения"),
+                                      label: Text(hasRecorded ? "Перезаписать жест" : "Подготовить запись"),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: hasRecorded ? const Color(0xFF232035) : const Color(0xFF2A1C2B),
                                         foregroundColor: hasRecorded ? Colors.white : const Color(0xFFCBA6F7),

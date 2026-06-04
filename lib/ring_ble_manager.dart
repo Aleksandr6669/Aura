@@ -178,10 +178,16 @@ class RingBleManager extends ChangeNotifier {
   final List<double> _liveMagnitudeWindow = [];
 
   // Dynamic recording state variables
-  bool isRecordingGesture = false;
+  bool isRecordingGesture = false;        // true = actively collecting samples
+  bool isWaitingForGesture = false;       // true = armed, waiting for motion to start
   List<double> recordedSamples = [];
-  Timer? _recordingTimer;
-  int recordingCountdown = 0;
+  Timer? _recordingTimer;                 // max-duration safety timeout
+  Timer? _silenceTimer;                   // fires when motion stops
+  int recordingCountdown = 0;             // UI countdown (seconds remaining)
+  double _recordingActivityThreshold = 800.0; // mag above baseline = motion detected
+  double _recordingBaseline = 0.0;        // resting magnitude reference
+  static const int _silenceMs = 800;      // ms of quiet after which recording stops
+  static const int _maxRecordingMs = 10000; // max 10 seconds
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<bool>? _scanningStateSub;
@@ -453,45 +459,53 @@ class RingBleManager extends ChangeNotifier {
   // Trigger real-time pattern matching for custom recorded gestures
   void _checkCustomGestures() {
     final now = DateTime.now();
-    // Cooldown of 2 seconds
+    // Cooldown of 2 seconds between triggers
     if (_lastGestureTrigger != null && now.difference(_lastGestureTrigger!) < const Duration(milliseconds: 2000)) {
       return;
     }
 
-    final liveNormalized = standardize(_liveMagnitudeWindow);
-
     GestureRule? bestRule;
-    double minDistance = double.infinity;
+    double bestNormalizedDist = double.infinity;
 
     for (var rule in gestureRules) {
-      if (rule.triggerType == "custom" && rule.template != null && rule.template!.isNotEmpty) {
-        final templateNormalized = standardize(rule.template!);
-        final dist = calculateDtw(liveNormalized, templateNormalized);
-        
-        if (dist < minDistance) {
-          minDistance = dist;
-          bestRule = rule;
-        }
+      if (rule.triggerType != "custom" || rule.template == null || rule.template!.length < 10) continue;
+
+      final templateLen = rule.template!.length;
+
+      // We need at least templateLen points in the live buffer
+      if (_liveMagnitudeWindow.length < templateLen) continue;
+
+      // Extract the last templateLen points from the live buffer
+      final liveSegment = _liveMagnitudeWindow.sublist(_liveMagnitudeWindow.length - templateLen);
+
+      final liveNormalized = standardize(liveSegment);
+      final templateNormalized = standardize(rule.template!);
+
+      final rawDist = calculateDtw(liveNormalized, templateNormalized);
+      // Normalize by path length so threshold is comparable across gesture sizes
+      final normalizedDist = rawDist / templateLen;
+
+      if (normalizedDist < bestNormalizedDist) {
+        bestNormalizedDist = normalizedDist;
+        bestRule = rule;
       }
     }
 
-    // Threshold: less than 55.0 is a match (standardized distance sum, adjusted for 150 points)
-    if (bestRule != null && minDistance < 55.0) {
+    // Threshold: normalized DTW per-point distance < 0.4 is a match
+    if (bestRule != null && bestNormalizedDist < 0.4) {
       _lastGestureTrigger = now;
-      _triggerCustomGestureAction(bestRule, minDistance);
+      _triggerCustomGestureAction(bestRule, bestNormalizedDist);
     }
   }
 
-  void _triggerCustomGestureAction(GestureRule rule, double distance) {
-    addLog("Custom gesture '${rule.name}' matched! (DTW Dist: ${distance.toStringAsFixed(1)})", tag: 'success');
-    
+  void _triggerCustomGestureAction(GestureRule rule, double normalizedDist) {
+    addLog("Жест '${rule.name}' совпал! (DTW: ${normalizedDist.toStringAsFixed(3)} на точку)", tag: 'success');
     gestureTriggeredAlert = true;
     notifyListeners();
     Future.delayed(const Duration(milliseconds: 800), () {
       gestureTriggeredAlert = false;
       notifyListeners();
     });
-
     _triggerRulesFor(rule.id);
   }
 
@@ -499,47 +513,136 @@ class RingBleManager extends ChangeNotifier {
     _triggerRulesFor(ruleId, isManual: true);
   }
 
-  // Start recording raw magnitude samples in real-time
+  // ─── Smart gesture recording ─────────────────────────────────────────────
+  // Phase 1: ARM  — user presses button, we compute baseline for 1s and wait
+  // Phase 2: WAIT — watching for motion that exceeds baseline + threshold
+  // Phase 3: REC  — collecting samples; silence timer resets on every active sample
+  // Phase 4: DONE — silence timer fires (or max duration), saves template
+
   Future<void> startRecordingGesture() async {
     if (!isConnected) {
-      addLog("Cannot record gesture: device is not connected", tag: 'error');
+      addLog("Кольцо не подключено — запись невозможна", tag: 'error');
       return;
     }
+
+    // Cancel any previous recording state cleanly
+    _recordingTimer?.cancel();
+    _silenceTimer?.cancel();
+    recordedSamples.clear();
+    isRecordingGesture = false;
+    isWaitingForGesture = false;
 
     // Ensure raw accelerometer sensor stream is running
     await startStream();
 
-    isRecordingGesture = true;
-    recordedSamples.clear();
-    recordingCountdown = 5; // Max 5 seconds timeout
-    notifyListeners();
-    addLog("🔴 Recording gesture: Perform the movement now!", tag: 'info');
+    // Compute baseline from recent calm data (use current live window average)
+    if (_liveMagnitudeWindow.isNotEmpty) {
+      _recordingBaseline = _liveMagnitudeWindow.reduce((a, b) => a + b) / _liveMagnitudeWindow.length;
+    } else {
+      _recordingBaseline = 1000.0; // Fallback resting magnitude
+    }
+    // Activity threshold = baseline + 20% extra or at least +400
+    _recordingActivityThreshold = _recordingBaseline + math.max(400.0, _recordingBaseline * 0.25);
 
-    _recordingTimer?.cancel();
+    // Enter waiting-for-motion phase
+    isWaitingForGesture = true;
+    recordingCountdown = 10; // Max wait: 10 seconds
+    notifyListeners();
+    addLog("⏳ Готов к записи — сделайте жест кольцом! (базовый уровень: ${_recordingBaseline.toStringAsFixed(0)})", tag: 'info');
+
+    // Safety timer: abort if no gesture starts within 10 seconds
     _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!isWaitingForGesture && !isRecordingGesture) {
+        timer.cancel(); // Already done
+        return;
+      }
       recordingCountdown--;
       if (recordingCountdown <= 0) {
-        stopRecordingGesture();
+        _abortRecording("Время истекло — жест не был обнаружен");
       } else {
         notifyListeners();
       }
     });
   }
 
+  /// Called from _parseNotificationData while waiting or recording
+  void _handleRecordingSample(double mag) {
+    if (isWaitingForGesture) {
+      // Check if motion has started
+      if (mag > _recordingActivityThreshold) {
+        // Motion detected — switch from waiting to recording
+        isWaitingForGesture = false;
+        isRecordingGesture = true;
+        recordedSamples.clear();
+        _recordingTimer?.cancel(); // Cancel the 10-second wait timeout
+        recordingCountdown = _maxRecordingMs ~/ 1000;
+        // Start max-duration safety timer
+        _recordingTimer = Timer(const Duration(milliseconds: _maxRecordingMs), () {
+          stopRecordingGesture();
+        });
+        addLog("🔴 Движение обнаружено! Запись...", tag: 'info');
+        notifyListeners();
+      }
+      return; // Don't collect samples yet
+    }
+
+    if (isRecordingGesture) {
+      recordedSamples.add(mag);
+
+      // Reset the silence timer on every sample above threshold
+      if (mag > _recordingActivityThreshold) {
+        _silenceTimer?.cancel();
+        _silenceTimer = Timer(const Duration(milliseconds: _silenceMs), () {
+          stopRecordingGesture();
+        });
+      } else {
+        // If motion is quiet, start silence timer if not already running
+        _silenceTimer ??= Timer(const Duration(milliseconds: _silenceMs), () {
+          stopRecordingGesture();
+        });
+      }
+
+      notifyListeners();
+    }
+  }
+
   void stopRecordingGesture() {
-    if (!isRecordingGesture) return;
+    if (!isRecordingGesture && !isWaitingForGesture) return;
     _recordingTimer?.cancel();
     _recordingTimer = null;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
     isRecordingGesture = false;
+    isWaitingForGesture = false;
     notifyListeners();
-    addLog("⏹️ Recording finished. Captured ${recordedSamples.length} samples.", tag: 'success');
+    if (recordedSamples.length >= 10) {
+      addLog("✅ Жест записан: ${recordedSamples.length} точек (~${(recordedSamples.length / 50.0).toStringAsFixed(1)} сек)", tag: 'success');
+    } else {
+      addLog("⚠️ Жест слишком короткий (${recordedSamples.length} точек) — попробуйте ещё раз", tag: 'warn');
+      recordedSamples.clear(); // Discard too-short gestures
+    }
+  }
+
+  void _abortRecording(String reason) {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    isRecordingGesture = false;
+    isWaitingForGesture = false;
+    recordedSamples.clear();
+    notifyListeners();
+    addLog("❌ $reason", tag: 'warn');
   }
 
   void clearRecordedSamples() {
     recordedSamples.clear();
     isRecordingGesture = false;
+    isWaitingForGesture = false;
     _recordingTimer?.cancel();
     _recordingTimer = null;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
     notifyListeners();
   }
 
@@ -925,22 +1028,25 @@ class RingBleManager extends ChangeNotifier {
         // Vector Magnitude calculation
         double currentMag = math.sqrt(currentX * currentX + currentY * currentY + currentZ * currentZ);
 
-        // 1. Process custom gesture recording (directly on incoming packets)
-        if (isRecordingGesture) {
-          recordedSamples.add(currentMag);
-          if (recordedSamples.length >= 150) {
-            stopRecordingGesture();
-          }
+        // 1. Smart gesture recording/waiting (directly on incoming packets)
+        if (isWaitingForGesture || isRecordingGesture) {
+          _handleRecordingSample(currentMag);
         }
 
         // 2. Process real-time custom gesture DTW matching (directly on incoming packets)
-        // This ensures matching works in the background when the app is minimized and the periodic UI timer is paused.
-        if (gestureActionsEnabled && !isRecordingGesture) {
+        // This ensures matching works in the background when the app is minimized.
+        if (gestureActionsEnabled && !isRecordingGesture && !isWaitingForGesture) {
           _liveMagnitudeWindow.add(currentMag);
-          if (_liveMagnitudeWindow.length > 150) {
+          // Keep a large circular buffer (max 500 pts ≈ 10s) to handle long gestures
+          if (_liveMagnitudeWindow.length > 500) {
             _liveMagnitudeWindow.removeAt(0);
           }
-          if (_liveMagnitudeWindow.length == 150) {
+          // Run checks as soon as we have enough data for the shortest template
+          final minTemplateLen = gestureRules
+              .where((r) => r.triggerType == "custom" && r.template != null && r.template!.length >= 10)
+              .map((r) => r.template!.length)
+              .fold<int>(10, (prev, len) => len < prev ? len : prev);
+          if (_liveMagnitudeWindow.length >= minTemplateLen) {
             _checkCustomGestures();
           }
         }
