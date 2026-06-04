@@ -29,11 +29,12 @@ class SensorPoint {
 class GestureRule {
   final String id;
   final String name;
-  final String triggerType; // "shake", "wrist_tap", or "custom"
+  final String triggerType; // "shake", "wrist_tap", "custom", or "packet"
   final String actionType;  // "get", "post", "ble_command"
   final String payload;     // URL or BLE HEX command
   final String? postData;   // JSON payload for POST (optional)
   final List<double>? template; // acceleration magnitude profile
+  final String? packetPattern; // Hex prefix/pattern matching
 
   GestureRule({
     required this.id,
@@ -43,6 +44,7 @@ class GestureRule {
     required this.payload,
     this.postData,
     this.template,
+    this.packetPattern,
   });
 
   Map<String, dynamic> toJson() => {
@@ -53,6 +55,7 @@ class GestureRule {
     'payload': payload,
     'postData': postData,
     'template': template,
+    'packetPattern': packetPattern,
   };
 
   factory GestureRule.fromJson(Map<String, dynamic> json) => GestureRule(
@@ -65,6 +68,7 @@ class GestureRule {
     template: json['template'] != null
         ? List<double>.from(json['template'].map((x) => (x as num).toDouble()))
         : null,
+    packetPattern: json['packetPattern'],
   );
 }
 
@@ -172,6 +176,7 @@ class RingBleManager extends ChangeNotifier {
   String assignedActionPayload = "";
   bool showNamelessDevices = false;
   DateTime? _lastGestureTrigger;
+  final Map<String, DateTime> _lastRuleTriggers = {};
   bool gestureTriggeredAlert = false;
   bool wakeGestureEnabled = false;
   bool wakeGestureActive = false;
@@ -347,6 +352,9 @@ class RingBleManager extends ChangeNotifier {
         gestureActionsEnabled = enabled;
         await prefs.setBool("gesture_actions_enabled", enabled);
         if (enabled) {
+          await writeCommand("050101");
+          await Future.delayed(const Duration(milliseconds: 200));
+          await writeCommand("050301");
           await startStream();
         } else {
           await stopStream();
@@ -371,6 +379,11 @@ class RingBleManager extends ChangeNotifier {
       if (wakeEnabled != null) {
         wakeGestureEnabled = wakeEnabled;
         await prefs.setBool("wake_gesture_enabled", wakeEnabled);
+        if (wakeEnabled) {
+          await writeCommand("050101");
+          await Future.delayed(const Duration(milliseconds: 200));
+          await writeCommand("050301");
+        }
       }
       notifyListeners();
     } catch (e) {
@@ -424,7 +437,16 @@ class RingBleManager extends ChangeNotifier {
     final rules = gestureRules.where((r) => r.triggerType == triggerTypeOrId || r.id == triggerTypeOrId).toList();
     if (rules.isEmpty) return;
 
+    final now = DateTime.now();
     for (var rule in rules) {
+      if (!isManual) {
+        final lastTime = _lastRuleTriggers[rule.id];
+        if (lastTime != null && now.difference(lastTime) < const Duration(milliseconds: 1500)) {
+          continue;
+        }
+        _lastRuleTriggers[rule.id] = now;
+      }
+
       addLog("Executing action '${rule.name}'...", tag: 'info');
 
       if (!isManual) {
@@ -432,6 +454,13 @@ class RingBleManager extends ChangeNotifier {
       }
       if (rule.actionType == "ble_command") {
         await writeCommand(rule.payload);
+      } else if (rule.actionType == "start_stream") {
+        addLog("🎬 Активация стрима акселерометра через правило '${rule.name}'", tag: 'info');
+        await startStream();
+        _resetStreamTimeout();
+      } else if (rule.actionType == "stop_stream") {
+        addLog("🛑 Отключение стрима акселерометра через правило '${rule.name}'", tag: 'info');
+        await stopStream();
       } else if (rule.actionType == "get") {
         try {
           final client = HttpClient();
@@ -1030,12 +1059,27 @@ class RingBleManager extends ChangeNotifier {
 
         // Instantly query battery level
         await writeCommand("03");
+        await Future.delayed(const Duration(milliseconds: 200));
+        await writeCommand("050101");
+        await Future.delayed(const Duration(milliseconds: 200));
+        await writeCommand("050301");
 
-        // Start battery monitoring timer (every 5 seconds)
+        // Start battery monitoring timer (every 5 seconds) and refresh gesture modes every 30 seconds
+        int refreshTicks = 0;
         _batteryTimer?.cancel();
         _batteryTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
           if (isConnected) {
             writeCommand("03");
+            refreshTicks++;
+            if (refreshTicks >= 6) {
+              refreshTicks = 0;
+              Future.delayed(const Duration(milliseconds: 200), () {
+                if (isConnected) writeCommand("050101");
+              });
+              Future.delayed(const Duration(milliseconds: 400), () {
+                if (isConnected) writeCommand("050301");
+              });
+            }
           } else {
             timer.cancel();
           }
@@ -1056,6 +1100,20 @@ class RingBleManager extends ChangeNotifier {
 
   void _parseNotificationData(List<int> data) {
     if (data.isEmpty) return;
+
+    final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+    addLog("📥 RX: $hex", tag: 'info');
+
+    // 0. Match custom packet prefix rules
+    final hexNoSpaces = hex.replaceAll(' ', '');
+    for (var rule in gestureRules) {
+      if (rule.triggerType == "packet" && rule.packetPattern != null && rule.packetPattern!.trim().isNotEmpty) {
+        final patternClean = rule.packetPattern!.replaceAll(RegExp(r'[^a-fA-F0-9]'), '').toUpperCase();
+        if (patternClean.isNotEmpty && hexNoSpaces.startsWith(patternClean)) {
+          _triggerRulesFor(rule.id);
+        }
+      }
+    }
 
     // Track accel packet rate — logs Hz every 3 seconds
     if (data[0] == 0xA1 && data.length >= 8 && data[1] == 0x03) {
@@ -1098,7 +1156,7 @@ class RingBleManager extends ChangeNotifier {
         }
 
         // 2. Process real-time custom gesture DTW matching with active motion detection
-        if (gestureActionsEnabled && !isRecordingGesture && !isWaitingForGesture) {
+        if (isStreaming && !isRecordingGesture && !isWaitingForGesture) {
           // Update baseline slowly when not actively moving
           if (!_isMovingActive) {
             _runningBaseline = _runningBaseline * 0.95 + currentMag * 0.05;
@@ -1137,7 +1195,7 @@ class RingBleManager extends ChangeNotifier {
         }
 
         // 3. Built-in shake gesture action check
-        if (gestureActionsEnabled) {
+        if (isStreaming) {
           if (currentMag > gestureThreshold) {
             final now = DateTime.now();
             if (_lastGestureTrigger == null || now.difference(_lastGestureTrigger!) > const Duration(seconds: 2)) {
@@ -1164,18 +1222,10 @@ class RingBleManager extends ChangeNotifier {
       notifyListeners();
     }
     // 3. Known gesture/event packets from Colmi firmware
-    //    0x14 = tap / wrist gesture event
-    else if (data[0] == 0x14) {
+    //    0x14 or 0x73 (subtype 0x0C) = tap / wrist gesture event
+    else if (data[0] == 0x14 || (data[0] == 0x73 && data.length > 1 && data[1] == 0x0C)) {
       final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-      addLog("👆 GESTURE EVENT [0x14]: $hex", tag: 'success');
-
-      // Auto-start streaming to allow custom gestures, and set the 30s timeout
-      if (gestureActionsEnabled) {
-        if (!isStreaming) {
-          startStream();
-        }
-        _resetStreamTimeout();
-      }
+      addLog("👆 GESTURE EVENT [0x${data[0].toRadixString(16).toUpperCase()}]: $hex", tag: 'success');
 
       if (wakeGestureEnabled) {
         _triggerWakeToggle();
@@ -1183,6 +1233,11 @@ class RingBleManager extends ChangeNotifier {
       if (gestureActionsEnabled) {
         _triggerRulesFor("wrist_tap");
       }
+    }
+    // 3.5. Typing/Activity reporting (0x73 subtype 0x12)
+    else if (data[0] == 0x73 && data.length > 1 && data[1] == 0x12) {
+      final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      addLog("⌨️ TYPING/MOTION REPORT [0x73, subtype 0x12]: $hex", tag: 'info');
     }
     // 4. Activity/step event packets
     else if (data[0] == 0x51 || data[0] == 0x52) {

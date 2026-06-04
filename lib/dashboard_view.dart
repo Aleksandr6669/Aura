@@ -302,10 +302,16 @@ class ScopeTabContent extends StatelessWidget {
                     ),
                   ),
                   Switch(
-                    value: manager.gestureActionsEnabled,
+                    value: manager.isStreaming,
                     onChanged: manager.isConnected
                         ? (val) {
-                            manager.saveGestureSettings(enabled: val);
+                            if (val) {
+                              manager.startStream();
+                              manager.saveGestureSettings(enabled: true);
+                            } else {
+                              manager.stopStream();
+                              manager.saveGestureSettings(enabled: false);
+                            }
                           }
                         : null,
                     activeThumbColor: const Color(0xFFA6E3A1),
@@ -1467,20 +1473,22 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
   Widget build(BuildContext context) {
     final manager = Provider.of<RingBleManager>(context, listen: false);
 
-    return Selector<RingBleManager, (bool, double, double, int, bool)>(
+    return Selector<RingBleManager, (bool, double, double, int, bool, bool)>(
       selector: (_, m) => (
         m.gestureActionsEnabled,
         m.gestureThreshold,
         m.customGestureThreshold,
         m.rulesVersion,
         m.wakeGestureEnabled,
+        m.isStreaming,
       ),
       builder: (context, data, _) {
-        final gestureActionsEnabled = data.$1;
+        // data.$1 is gestureActionsEnabled (using isStreaming for UI toggle)
         final gestureThreshold = data.$2;
         final customGestureThreshold = data.$3;
         // rulesVersion (data.$4) is used by Selector to trigger rebuilds
         final wakeGestureEnabled = data.$5;
+        final isStreaming = data.$6;
         final gestureRules = manager.gestureRules;
 
         return Scaffold(
@@ -1526,9 +1534,15 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                               ],
                             ),
                             Switch(
-                              value: gestureActionsEnabled,
+                              value: isStreaming,
                               onChanged: (val) {
-                                manager.saveGestureSettings(enabled: val);
+                                if (val) {
+                                  manager.startStream();
+                                  manager.saveGestureSettings(enabled: true);
+                                } else {
+                                  manager.stopStream();
+                                  manager.saveGestureSettings(enabled: false);
+                                }
                               },
                               activeThumbColor: const Color(0xFF74C7EC),
                             ),
@@ -1570,64 +1584,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                   ),
                   const SizedBox(height: 16),
 
-                  // 2.5 Hardware Gesture Activation Card
-                  if (manager.isConnected) ...[
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF13111C),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFF232035)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const Text(
-                            "НАСТРОЙКА ВСТРОЕННЫХ ЖЕСТОВ КОЛЬЦА",
-                            style: TextStyle(color: Color(0xFF89B4FA), fontSize: 11, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            "Отправьте команды конфигурации на кольцо, чтобы активировать встроенное аппаратное распознавание движений.",
-                            style: TextStyle(color: Color(0xFF9E9BAC), fontSize: 12),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => manager.writeCommand("050101"),
-                                  icon: const Icon(Icons.gesture_rounded, size: 14),
-                                  label: const Text("Активировать жест (050101)", style: TextStyle(fontSize: 10)),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF1B3D30),
-                                    foregroundColor: const Color(0xFFA6E3A1),
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => manager.writeCommand("050301"),
-                                  icon: const Icon(Icons.touch_app_rounded, size: 14),
-                                  label: const Text("Активировать тап (050301)", style: TextStyle(fontSize: 10)),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF1B3D30),
-                                    foregroundColor: const Color(0xFFA6E3A1),
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+
 
                   // 3. Settings Card
                   Container(
@@ -1841,6 +1798,10 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
       triggerIcon = Icons.gesture_rounded;
       triggerLabel = "Записанный жест (Custom)";
       triggerColor = const Color(0xFF89B4FA);
+    } else if (rule.triggerType == "packet") {
+      triggerIcon = Icons.code_rounded;
+      triggerLabel = "Пакет: ${rule.packetPattern ?? ''}";
+      triggerColor = const Color(0xFF94E2D5);
     }
 
     String actionLabel = "GET";
@@ -1850,6 +1811,12 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
       actionBadgeColor = const Color(0xFF74C7EC);
     } else if (rule.actionType == "ble_command") {
       actionLabel = "BLE";
+      actionBadgeColor = const Color(0xFFFAB387);
+    } else if (rule.actionType == "start_stream") {
+      actionLabel = "СТРИМ ВКЛ";
+      actionBadgeColor = const Color(0xFFCBA6F7);
+    } else if (rule.actionType == "stop_stream") {
+      actionLabel = "СТРИМ ВЫКЛ";
       actionBadgeColor = const Color(0xFFF38BA8);
     }
 
@@ -1899,6 +1866,11 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                   ],
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -1915,7 +1887,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const Spacer(),
               // Run Test trigger button
               IconButton(
                 icon: const Icon(Icons.play_circle_outline_rounded, color: Color(0xFFA6E3A1), size: 22),
@@ -1934,7 +1906,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                 },
                 tooltip: "Тест запуска действия",
                 constraints: const BoxConstraints(),
-                padding: EdgeInsets.zero,
+                padding: const EdgeInsets.all(4),
               ),
               const SizedBox(width: 8),
               // Edit Button
@@ -1945,7 +1917,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                 },
                 tooltip: "Редактировать правило",
                 constraints: const BoxConstraints(),
-                padding: EdgeInsets.zero,
+                padding: const EdgeInsets.all(4),
               ),
               const SizedBox(width: 8),
               // Delete Button
@@ -1955,7 +1927,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                   _showDeleteConfirmDialog(context, manager, rule);
                 },
                 constraints: const BoxConstraints(),
-                padding: EdgeInsets.zero,
+                padding: const EdgeInsets.all(4),
               ),
             ],
           ),
@@ -2075,6 +2047,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
     String actionType = ruleToEdit?.actionType ?? "get";
     String payload = ruleToEdit?.payload ?? "";
     String postData = ruleToEdit?.postData ?? "";
+    String packetPattern = ruleToEdit?.packetPattern ?? "";
     List<double> capturedTemplate = ruleToEdit?.template != null ? List<double>.from(ruleToEdit!.template!) : [];
 
     manager.clearRecordedSamples();
@@ -2209,6 +2182,10 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                               value: "custom",
                               child: Text("Записать свой жест (Custom)", style: TextStyle(color: Colors.white, fontSize: 13)),
                             ),
+                            DropdownMenuItem(
+                              value: "packet",
+                              child: Text("По паттерну пакета (Packet Pattern)", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
                           ],
                           onChanged: (val) {
                             if (val != null) {
@@ -2218,6 +2195,47 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                             }
                           },
                         ),
+                        
+                        // 2.3 Custom packet pattern input
+                        if (triggerType == "packet") ...[
+                          const SizedBox(height: 16),
+                          const Text(
+                            "ШАБЛОН ПАКЕТА (HEX)",
+                            style: TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            initialValue: packetPattern,
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'Fira Code'),
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: const Color(0xFF0B0A11),
+                              hintText: "Например: 73 0C или 73 12 или 14",
+                              hintStyle: const TextStyle(color: Color(0xFF5D5A75), fontSize: 12, fontFamily: 'sans-serif'),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              enabledBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(color: Color(0xFF232035)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(color: Color(0xFF74C7EC)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return "Введите HEX-паттерн пакета";
+                              }
+                              final clean = value.replaceAll(RegExp(r'[^a-fA-F0-9]'), '');
+                              if (clean.isEmpty) {
+                                return "Недопустимый HEX-формат";
+                              }
+                              return null;
+                            },
+                            onSaved: (val) => packetPattern = val!.trim(),
+                            onChanged: (val) => packetPattern = val,
+                          ),
+                        ],
                         
                         // 2.5 Real-time gesture recorder panel
                         if (triggerType == "custom") ...[
@@ -2330,6 +2348,20 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                                           historyY: liveManager.historyY,
                                           historyZ: liveManager.historyZ,
                                           historyMag: liveManager.historyMag,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      ElevatedButton.icon(
+                                        onPressed: () {
+                                          liveManager.stopRecordingGesture();
+                                        },
+                                        icon: const Icon(Icons.stop_rounded),
+                                        label: const Text("Остановить запись"),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF4C1D24),
+                                          foregroundColor: const Color(0xFFF38BA8),
+                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                         ),
                                       ),
                                     ],
@@ -2464,6 +2496,14 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                               value: "ble_command",
                               child: Text("Отправить BLE команду на кольцо", style: TextStyle(color: Colors.white, fontSize: 13)),
                             ),
+                            DropdownMenuItem(
+                              value: "start_stream",
+                              child: Text("Включить стрим акселерометра", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
+                            DropdownMenuItem(
+                              value: "stop_stream",
+                              child: Text("Выключить стрим акселерометра", style: TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
                           ],
                           onChanged: (val) {
                             if (val != null) {
@@ -2475,46 +2515,48 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                         ),
                         const SizedBox(height: 16),
 
-                        // 4. Payload input
-                        Text(
-                          actionType == "ble_command" ? "HEX КОМАНДА КОЛЬЦА" : "URL АДРЕС ВЕБХУКА",
-                          style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          initialValue: payload,
-                          style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'Fira Code'),
-                          decoration: InputDecoration(
-                            filled: true,
-                            fillColor: const Color(0xFF0B0A11),
-                            hintText: actionType == "ble_command"
-                                ? "Например, a104 или a102 (нечетные команды, авторасчет CRC)"
-                                : "Например, https://api.smart-home.ru/v1/devices/toggle",
-                            hintStyle: const TextStyle(color: Color(0xFF5D5A75), fontSize: 12, fontFamily: 'sans-serif'),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            enabledBorder: OutlineInputBorder(
-                              borderSide: const BorderSide(color: Color(0xFF232035)),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: const BorderSide(color: Color(0xFF74C7EC)),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
+                        // 4. Payload input (hidden for stream toggle actions)
+                        if (actionType != "start_stream" && actionType != "stop_stream") ...[
+                          Text(
+                            actionType == "ble_command" ? "HEX КОМАНДА КОЛЬЦА" : "URL АДРЕС ВЕБХУКА",
+                            style: const TextStyle(color: Color(0xFF6C6E85), fontSize: 10, fontWeight: FontWeight.bold),
                           ),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return "Поле обязательно для заполнения";
-                            }
-                            if (actionType != "ble_command") {
-                              final urlStr = value.trim().toLowerCase();
-                              if (!urlStr.startsWith("http://") && !urlStr.startsWith("https://")) {
-                                return "Адрес должен начинаться с http:// или https://";
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            initialValue: payload,
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'Fira Code'),
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: const Color(0xFF0B0A11),
+                              hintText: actionType == "ble_command"
+                                  ? "Например, a104 или a102 (нечетные команды, авторасчет CRC)"
+                                  : "Например, https://api.smart-home.ru/v1/devices/toggle",
+                              hintStyle: const TextStyle(color: Color(0xFF5D5A75), fontSize: 12, fontFamily: 'sans-serif'),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              enabledBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(color: Color(0xFF232035)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(color: Color(0xFF74C7EC)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return "Поле обязательно для заполнения";
                               }
-                            }
-                            return null;
-                          },
-                          onSaved: (val) => payload = val!.trim(),
-                        ),
+                              if (actionType != "ble_command") {
+                                final urlStr = value.trim().toLowerCase();
+                                if (!urlStr.startsWith("http://") && !urlStr.startsWith("https://")) {
+                                  return "Адрес должен начинаться с http:// или https://";
+                                }
+                              }
+                              return null;
+                            },
+                            onSaved: (val) => payload = val!.trim(),
+                          ),
+                        ],
 
                         // 5. POST body JSON textfield
                         if (actionType == "post") ...[
@@ -2588,6 +2630,7 @@ class _GesturesTabContentState extends State<GesturesTabContent> {
                               payload: payload,
                               postData: postData.isNotEmpty ? postData : null,
                               template: triggerType == "custom" ? capturedTemplate : null,
+                              packetPattern: triggerType == "packet" ? packetPattern : null,
                             );
                             if (ruleToEdit != null) {
                               manager.updateGestureRule(newRule);
