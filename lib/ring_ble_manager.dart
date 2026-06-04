@@ -177,6 +177,10 @@ class RingBleManager extends ChangeNotifier {
   // Sliding window buffer for real-time custom gestures
   final List<double> _liveMagnitudeWindow = [];
 
+  // Packet rate measurement
+  int _packetCount = 0;
+  DateTime? _lastRateCheck;
+
   // Dynamic recording state variables
   bool isRecordingGesture = false;        // true = actively collecting samples
   bool isWaitingForGesture = false;       // true = armed, waiting for motion to start
@@ -1014,6 +1018,20 @@ class RingBleManager extends ChangeNotifier {
 
   void _parseNotificationData(List<int> data) {
     if (data.isEmpty) return;
+
+    // Track accel packet rate — logs Hz every 3 seconds
+    if (data[0] == 0xA1 && data.length >= 8 && data[1] == 0x03) {
+      _packetCount++;
+      final now = DateTime.now();
+      _lastRateCheck ??= now;
+      final elapsed = now.difference(_lastRateCheck!).inMilliseconds;
+      if (elapsed >= 3000) {
+        final hz = (_packetCount * 1000 / elapsed).toStringAsFixed(1);
+        addLog("📡 Частота данных кольца: $hz Гц (${ _packetCount} пакетов за ${(elapsed/1000).toStringAsFixed(1)}с)", tag: 'info');
+        _packetCount = 0;
+        _lastRateCheck = now;
+      }
+    }
 
     // 1. Accelerometer packets (0xA1 with subtype 0x03)
     if (data[0] == 0xA1 && data.length >= 8) {
