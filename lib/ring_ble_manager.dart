@@ -194,11 +194,11 @@ class RingBleManager extends ChangeNotifier {
   double _recordingBaseline = 0.0;        // resting magnitude reference
   static const int _silenceMs = 800;      // ms of quiet after which recording stops
   static const int _maxRecordingMs = 10000; // max 10 seconds
-  static const int _calibrationSamples = 60; // ~1.2s at 50Hz to measure resting level
 
-  // Calibration state
-  bool isCalibrating = false;
-  final List<double> _calibrationBuffer = [];
+  // Simple rolling baseline for motion detection (last 20 calm samples)
+  final List<double> _baselineWindow = [];
+  static const int _baselineWindowSize = 20;
+  bool isCalibrating = false; // kept for UI compat, set briefly then cleared
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<bool>? _scanningStateSub;
@@ -540,82 +540,106 @@ class RingBleManager extends ChangeNotifier {
     _recordingTimer?.cancel();
     _silenceTimer?.cancel();
     recordedSamples.clear();
-    _calibrationBuffer.clear();
+    _baselineWindow.clear();
     isRecordingGesture = false;
     isWaitingForGesture = false;
     isCalibrating = false;
 
     // Ensure raw accelerometer stream is running
     await startStream();
+    // Give ring 400ms to start sending packets after command
+    await Future.delayed(const Duration(milliseconds: 400));
 
-    // Phase 0: CALIBRATION — collect live packets to measure actual resting level
-    isCalibrating = true;
-    recordingCountdown = 12; // total budget: 2s calibration + 10s wait
+    isWaitingForGesture = true;
+    recordingCountdown = 15; // 15 seconds to make gesture
     notifyListeners();
-    addLog("🔍 Калибровка... Держите кольцо неподвижно (1 сек)", tag: 'info');
+    addLog("⏳ Готов — сделайте любой жест кольцом!", tag: 'info');
 
     // Safety countdown timer
     _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!isCalibrating && !isWaitingForGesture && !isRecordingGesture) {
+      if (!isWaitingForGesture && !isRecordingGesture) {
         timer.cancel();
         return;
       }
       recordingCountdown--;
       if (recordingCountdown <= 0) {
-        _abortRecording("Время истекло — жест не был обнаружен");
+        _abortRecording("Время истекло — жест не был обнаружен. Попробуйте снова.");
       } else {
         notifyListeners();
       }
     });
   }
 
-  /// Called from _parseNotificationData while calibrating, waiting or recording
+  /// Called from _parseNotificationData while waiting or recording
   void _handleRecordingSample(double mag) {
-    // ─── Phase 0: CALIBRATION — measure actual resting level ─────────────────
-    if (isCalibrating) {
-      _calibrationBuffer.add(mag);
-      if (_calibrationBuffer.length >= _calibrationSamples) {
-        // Compute resting baseline and set threshold 40% above it
-        _recordingBaseline = _calibrationBuffer.reduce((a, b) => a + b) / _calibrationBuffer.length;
-        // Threshold = baseline + 40%, but minimum +300 to avoid false triggers from breathing
-        _recordingActivityThreshold = _recordingBaseline + math.max(300.0, _recordingBaseline * 0.40);
-        isCalibrating = false;
-        isWaitingForGesture = true;
-        addLog("⏳ Готов — сделайте жест! покой: ${_recordingBaseline.toStringAsFixed(0)}, порог: ${_recordingActivityThreshold.toStringAsFixed(0)}", tag: 'info');
-        notifyListeners();
-      }
-      return;
-    }
-
-    // ─── Phase 1: WAITING — detect motion start ──────────────────────────────
+    // ─── Phase: WAITING — detect motion using energy spike detection ──────────
     if (isWaitingForGesture) {
-      if (mag > _recordingActivityThreshold) {
+      // Build a rolling baseline window from calm samples
+      _baselineWindow.add(mag);
+      if (_baselineWindow.length > _baselineWindowSize) {
+        _baselineWindow.removeAt(0);
+      }
+
+      // Need at least 8 samples before checking (avoids false trigger on startup)
+      if (_baselineWindow.length < 8) return;
+
+      // Compute variance of the last 5 samples vs full window
+      final recentN = 5;
+      final recent = _baselineWindow.sublist(math.max(0, _baselineWindow.length - recentN));
+      final recentMean = recent.reduce((a, b) => a + b) / recent.length;
+      final recentVar = recent.map((x) => (x - recentMean) * (x - recentMean)).reduce((a, b) => a + b) / recent.length;
+
+      final allMean = _baselineWindow.reduce((a, b) => a + b) / _baselineWindow.length;
+      final allVar = _baselineWindow.map((x) => (x - allMean) * (x - allMean)).reduce((a, b) => a + b) / _baselineWindow.length;
+      // Prevent division by zero for flat signals
+      final baselineVar = math.max(allVar, 100.0);
+
+      // Motion detected when recent variance is 4x the baseline variance
+      final energyRatio = recentVar / baselineVar;
+      if (energyRatio > 4.0) {
         isWaitingForGesture = false;
         isRecordingGesture = true;
         recordedSamples.clear();
         _recordingTimer?.cancel();
         recordingCountdown = _maxRecordingMs ~/ 1000;
-        _recordingTimer = Timer(const Duration(milliseconds: _maxRecordingMs), () {
-          stopRecordingGesture();
-        });
-        addLog("🔴 Движение обнаружено! (mag=${mag.toStringAsFixed(0)} > порог=${_recordingActivityThreshold.toStringAsFixed(0)}) Запись...", tag: 'info');
+        _recordingTimer = Timer(const Duration(milliseconds: _maxRecordingMs), stopRecordingGesture);
+        addLog("🔴 Движение обнаружено! (энергия=${energyRatio.toStringAsFixed(1)}x) Запись...", tag: 'info');
         notifyListeners();
       }
       return;
     }
 
-    // ─── Phase 2: RECORDING — collect samples ───────────────────────────────
+    // ─── Phase: RECORDING — collect samples ───────────────────────────────────
     if (isRecordingGesture) {
       recordedSamples.add(mag);
-      if (mag > _recordingActivityThreshold) {
-        _silenceTimer?.cancel();
-        _silenceTimer = Timer(const Duration(milliseconds: _silenceMs), () {
-          stopRecordingGesture();
-        });
+
+      // Compute current energy to detect silence
+      final recentN = 5;
+      if (recordedSamples.length >= recentN) {
+        final tail = recordedSamples.sublist(recordedSamples.length - recentN);
+        final tailMean = tail.reduce((a, b) => a + b) / tail.length;
+        final tailVar = tail.map((x) => (x - tailMean) * (x - tailMean)).reduce((a, b) => a + b) / tail.length;
+        final baselineVar = math.max(
+          (_baselineWindow.isNotEmpty
+              ? _baselineWindow.map((x) {
+                  final m = _baselineWindow.reduce((a, b) => a + b) / _baselineWindow.length;
+                  return (x - m) * (x - m);
+                }).reduce((a, b) => a + b) / _baselineWindow.length
+              : 500.0),
+          100.0,
+        );
+        final isActive = tailVar / baselineVar > 2.0;
+        if (isActive) {
+          // Still moving — reset silence timer
+          _silenceTimer?.cancel();
+          _silenceTimer = Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
+        } else {
+          // Silent — start silence timer if not already running
+          _silenceTimer ??= Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
+        }
       } else {
-        _silenceTimer ??= Timer(const Duration(milliseconds: _silenceMs), () {
-          stopRecordingGesture();
-        });
+        // Not enough samples yet, just start silence timer
+        _silenceTimer ??= Timer(const Duration(milliseconds: _silenceMs), stopRecordingGesture);
       }
       notifyListeners();
     }
@@ -649,7 +673,7 @@ class RingBleManager extends ChangeNotifier {
     isRecordingGesture = false;
     isWaitingForGesture = false;
     isCalibrating = false;
-    _calibrationBuffer.clear();
+    _baselineWindow.clear();
     recordedSamples.clear();
     recordingStatusMessage = reason;
     notifyListeners();
@@ -658,7 +682,7 @@ class RingBleManager extends ChangeNotifier {
 
   void clearRecordedSamples() {
     recordedSamples.clear();
-    _calibrationBuffer.clear();
+    _baselineWindow.clear();
     isRecordingGesture = false;
     isWaitingForGesture = false;
     isCalibrating = false;
