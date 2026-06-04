@@ -825,6 +825,22 @@ class RingBleManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> startStream() async {
+    if (!isConnected) return;
+    addLog("Initiating high-frequency sensor stream...", tag: 'info');
+    // Send standard setup/metrics command (tells ring to activate streaming parameters)
+    await writeCommand("0a0200");
+    await Future.delayed(const Duration(milliseconds: 300));
+    // Send enable raw accelerometer streaming command
+    await writeCommand("a104");
+  }
+
+  Future<void> stopStream() async {
+    if (!isConnected) return;
+    addLog("Terminating sensor stream...", tag: 'info');
+    await writeCommand("a102");
+  }
+
   void _handleDisconnect({bool autoScanReconnect = true}) async {
     isConnected = false;
     connectedDevice = null;

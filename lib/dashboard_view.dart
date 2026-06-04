@@ -243,7 +243,7 @@ class ScopeTabContent extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: manager.isConnected ? () => manager.writeCommand("a104") : null,
+                    onPressed: manager.isConnected ? () => manager.startStream() : null,
                     icon: const Icon(Icons.play_arrow_rounded, size: 16),
                     label: const Text("Start"),
                     style: ElevatedButton.styleFrom(
@@ -258,7 +258,7 @@ class ScopeTabContent extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: manager.isConnected ? () => manager.writeCommand("a102") : null,
+                    onPressed: manager.isConnected ? () => manager.stopStream() : null,
                     icon: const Icon(Icons.stop_rounded, size: 16),
                     label: const Text("Stop"),
                     style: ElevatedButton.styleFrom(
